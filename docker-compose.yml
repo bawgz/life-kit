@@ -1,0 +1,59 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./apps/frontend/dist:/srv/frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - mcp-server
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    restart: unless-stopped
+    # ADMIN_PASSWORD_HASH/API_TOKEN come from this file, loaded raw (no ${}
+    # interpolation) — bcrypt hashes contain literal "$" characters that
+    # docker-compose's variable substitution silently corrupts if piped
+    # through environment: ${VAR} instead.
+    env_file:
+      - apps/backend/.env
+    environment:
+      - PORT=3001
+      - DB_PATH=/data/life-kit.sqlite
+      - NODE_ENV=production
+    volumes:
+      - backend_data:/data
+    expose:
+      - "3001"
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: apps/mcp-server/Dockerfile
+    restart: unless-stopped
+    # See the note on backend's env_file above — same reasoning applies to
+    # BACKEND_API_TOKEN/MCP_AUTH_TOKEN.
+    env_file:
+      - apps/mcp-server/.env
+    environment:
+      - PORT=3002
+      - BACKEND_URL=http://backend:3001
+    depends_on:
+      - backend
+    expose:
+      - "3002"
+
+volumes:
+  caddy_data:
+  caddy_config:
+  backend_data:
