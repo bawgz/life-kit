@@ -1,6 +1,8 @@
 services:
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.caddy
     restart: unless-stopped
     ports:
       - "80:80"
@@ -8,8 +10,6 @@ services:
     environment:
       - DOMAIN=${DOMAIN}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./apps/frontend/dist:/srv/frontend:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

@@ -19,4 +19,4 @@ RUN npm run build -w packages/shared && npm run build -w apps/frontend
 
 FROM caddy:2-alpine
 COPY Caddyfile /etc/caddy/Caddyfile
-COPY --from=build /app/apps/frontend/dist /srv
+COPY --from=build /app/apps/frontend/dist /srv/frontend
