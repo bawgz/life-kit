@@ -16,17 +16,10 @@ import { requireAuth } from "../middleware/auth.js";
 interface SessionRow {
   id: number;
   scheduled_workout_id: number | null;
-  plan_id: number | null;
   date: string;
   started_at: string | null;
   completed_at: string | null;
   notes: string | null;
-  pain_during: number | null;
-  pain_after: number | null;
-  pain_next_morning: number | null;
-  /** Joined from plans (via plan_id or scheduled_workout_id); absent on bare SELECT *. */
-  plan_name?: string | null;
-  plan_kind?: string | null;
 }
 interface SessionItemRow {
   id: number;
@@ -45,10 +38,6 @@ interface SessionItemSetRow {
   distance_meters: number | null;
   extra: string | null;
   completed_at: string | null;
-  target_reps: number | null;
-  target_weight: number | null;
-  target_duration_seconds: number | null;
-  target_distance_meters: number | null;
 }
 interface PlanItemRow {
   id: number;
@@ -57,29 +46,14 @@ interface PlanItemRow {
   order_index: number;
   notes: string | null;
 }
-interface PlanItemSetRow {
-  id: number;
-  plan_item_id: number;
-  set_number: number;
-  target_reps: number | null;
-  target_weight: number | null;
-  target_duration_seconds: number | null;
-  target_distance_meters: number | null;
-}
 
 const rowToSession = (row: SessionRow): Session => ({
   id: row.id,
   scheduledWorkoutId: row.scheduled_workout_id,
-  planId: row.plan_id,
-  planName: row.plan_name ?? null,
-  planKind: row.plan_kind ?? null,
   date: row.date,
   startedAt: row.started_at,
   completedAt: row.completed_at,
   notes: row.notes,
-  painDuring: row.pain_during,
-  painAfter: row.pain_after,
-  painNextMorning: row.pain_next_morning,
 });
 
 const rowToSessionItem = (row: SessionItemRow): SessionItem => ({
@@ -100,26 +74,11 @@ const rowToSessionItemSet = (row: SessionItemSetRow): SessionItemSet => ({
   distanceMeters: row.distance_meters,
   extra: parseJson(row.extra),
   completedAt: row.completed_at,
-  targetReps: row.target_reps,
-  targetWeight: row.target_weight,
-  targetDurationSeconds: row.target_duration_seconds,
-  targetDistanceMeters: row.target_distance_meters,
 });
-
-/** Base SELECT for sessions with the plan name/kind joined in. */
-const SESSION_WITH_PLAN = `
-  SELECT s.*,
-         COALESCE(p1.name, p2.name) AS plan_name,
-         COALESCE(p1.kind, p2.kind) AS plan_kind
-  FROM sessions s
-  LEFT JOIN plans p1 ON p1.id = s.plan_id
-  LEFT JOIN scheduled_workouts sw ON sw.id = s.scheduled_workout_id
-  LEFT JOIN plans p2 ON p2.id = sw.plan_id
-`;
 
 function loadSessionDetail(sessionId: number): SessionDetail | null {
   const sessionRow = db
-    .prepare<[number], SessionRow>(`${SESSION_WITH_PLAN} WHERE s.id = ?`)
+    .prepare<[number], SessionRow>("SELECT * FROM sessions WHERE id = ?")
     .get(sessionId);
   if (!sessionRow) return null;
 
@@ -154,7 +113,7 @@ export function registerSessionRoutes(root: FastifyInstance): void {
       const { from, to } = request.query;
       const rows = db
         .prepare<[string, string], SessionRow>(
-          `${SESSION_WITH_PLAN} WHERE s.date >= ? AND s.date <= ? ORDER BY s.date DESC`
+          `SELECT * FROM sessions WHERE date >= ? AND date <= ? ORDER BY date DESC`
         )
         .all(from ?? "0000-01-01", to ?? "9999-12-31");
       return rows.map(rowToSession);
@@ -164,18 +123,23 @@ export function registerSessionRoutes(root: FastifyInstance): void {
   app.post<{ Body: CreateSessionRequest }>(
     "/api/sessions",
     async (request, reply) => {
-      const {
-        scheduledWorkoutId,
-        planId,
-        date,
-        notes,
-        painDuring,
-        painAfter,
-        painNextMorning,
-      } = request.body;
+      const { scheduledWorkoutId, planId, date, notes } = request.body;
       if (!date) return reply.code(400).send({ error: "date is required" });
 
       const sessionId = db.transaction(() => {
+        const result = db
+          .prepare(
+            `INSERT INTO sessions (scheduled_workout_id, date, started_at, notes)
+             VALUES (?, ?, ?, ?)`
+          )
+          .run(
+            scheduledWorkoutId ?? null,
+            date,
+            new Date().toISOString(),
+            notes ?? null
+          );
+        const id = Number(result.lastInsertRowid);
+
         let effectivePlanId = planId ?? null;
         if (!effectivePlanId && scheduledWorkoutId) {
           const scheduled = db
@@ -186,65 +150,18 @@ export function registerSessionRoutes(root: FastifyInstance): void {
           effectivePlanId = scheduled?.plan_id ?? null;
         }
 
-        const result = db
-          .prepare(
-            `INSERT INTO sessions
-               (scheduled_workout_id, plan_id, date, started_at, notes,
-                pain_during, pain_after, pain_next_morning)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-          )
-          .run(
-            scheduledWorkoutId ?? null,
-            effectivePlanId,
-            date,
-            new Date().toISOString(),
-            notes ?? null,
-            painDuring ?? null,
-            painAfter ?? null,
-            painNextMorning ?? null
-          );
-        const id = Number(result.lastInsertRowid);
-
         if (effectivePlanId) {
-          // Pre-populate items AND their target sets from the plan. Target
-          // sets are placeholder rows (no actuals, no completed_at) that the
-          // client fills in as the workout progresses.
           const planItems = db
             .prepare<[number], PlanItemRow>(
               "SELECT * FROM plan_items WHERE plan_id = ? ORDER BY order_index"
             )
             .all(effectivePlanId);
-          const planSetsStmt = db.prepare<[number], PlanItemSetRow>(
-            "SELECT * FROM plan_item_sets WHERE plan_item_id = ? ORDER BY set_number"
-          );
           const insertItem = db.prepare(
             `INSERT INTO session_items (session_id, name, order_index, notes)
              VALUES (?, ?, ?, ?)`
           );
-          const insertSet = db.prepare(
-            `INSERT INTO session_item_sets
-               (session_item_id, set_number, target_reps, target_weight,
-                target_duration_seconds, target_distance_meters)
-             VALUES (?, ?, ?, ?, ?, ?)`
-          );
           for (const planItem of planItems) {
-            const itemResult = insertItem.run(
-              id,
-              planItem.name,
-              planItem.order_index,
-              planItem.notes
-            );
-            const sessionItemId = Number(itemResult.lastInsertRowid);
-            for (const planSet of planSetsStmt.all(planItem.id)) {
-              insertSet.run(
-                sessionItemId,
-                planSet.set_number,
-                planSet.target_reps,
-                planSet.target_weight,
-                planSet.target_duration_seconds,
-                planSet.target_distance_meters
-              );
-            }
+            insertItem.run(id, planItem.name, planItem.order_index, planItem.notes);
           }
         }
 
@@ -273,19 +190,10 @@ export function registerSessionRoutes(root: FastifyInstance): void {
         .get(id);
       if (!existing) return reply.code(404).send({ error: "Not found" });
 
-      const { notes, completedAt, painDuring, painAfter, painNextMorning } =
-        request.body;
-      db.prepare(
-        `UPDATE sessions
-         SET notes = ?, completed_at = ?, pain_during = ?, pain_after = ?,
-             pain_next_morning = ?
-         WHERE id = ?`
-      ).run(
+      const { notes, completedAt } = request.body;
+      db.prepare("UPDATE sessions SET notes = ?, completed_at = ? WHERE id = ?").run(
         notes !== undefined ? notes : existing.notes,
         completedAt !== undefined ? completedAt : existing.completed_at,
-        painDuring !== undefined ? painDuring : existing.pain_during,
-        painAfter !== undefined ? painAfter : existing.pain_after,
-        painNextMorning !== undefined ? painNextMorning : existing.pain_next_morning,
         id
       );
       return loadSessionDetail(id);
@@ -324,52 +232,21 @@ export function registerSessionRoutes(root: FastifyInstance): void {
 
     const { setNumber, reps, weight, durationSeconds, distanceMeters, extra } =
       request.body;
-    const now = new Date().toISOString();
-
-    // If the session was started from a plan, a placeholder row already exists
-    // for this set number (targets copied, no actuals yet) — fill it in
-    // instead of inserting a duplicate.
-    const placeholder = db
-      .prepare<[string, number], SessionItemSetRow>(
-        `SELECT * FROM session_item_sets
-         WHERE session_item_id = ? AND set_number = ?
-           AND reps IS NULL AND weight IS NULL AND duration_seconds IS NULL
-           AND distance_meters IS NULL AND completed_at IS NULL`
-      )
-      .get(itemId, setNumber);
-
-    if (placeholder) {
-      db.prepare(
-        `UPDATE session_item_sets
-         SET reps = ?, weight = ?, duration_seconds = ?, distance_meters = ?,
-             extra = ?, completed_at = ?
-         WHERE id = ?`
-      ).run(
-        reps ?? null,
-        weight ?? null,
-        durationSeconds ?? null,
-        distanceMeters ?? null,
-        toJson(extra),
-        now,
-        placeholder.id
-      );
-    } else {
-      db.prepare(
-        `INSERT INTO session_item_sets
-           (session_item_id, set_number, reps, weight, duration_seconds,
-            distance_meters, extra, completed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        itemId,
-        setNumber,
-        reps ?? null,
-        weight ?? null,
-        durationSeconds ?? null,
-        distanceMeters ?? null,
-        toJson(extra),
-        now
-      );
-    }
+    db.prepare(
+      `INSERT INTO session_item_sets
+         (session_item_id, set_number, reps, weight, duration_seconds,
+          distance_meters, extra, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      itemId,
+      setNumber,
+      reps ?? null,
+      weight ?? null,
+      durationSeconds ?? null,
+      distanceMeters ?? null,
+      toJson(extra),
+      new Date().toISOString()
+    );
     return reply.code(201).send(loadSessionDetail(Number(id)));
   });
 
@@ -410,31 +287,6 @@ export function registerSessionRoutes(root: FastifyInstance): void {
       db.prepare("DELETE FROM session_item_sets WHERE id = ?").run(
         request.params.setId
       );
-      return reply.code(204).send();
-    }
-  );
-
-  app.delete<{ Params: { id: string; itemId: string } }>(
-    "/api/sessions/:id/items/:itemId",
-    async (request, reply) => {
-      const sessionId = Number(request.params.id);
-      const item = db
-        .prepare<[string], { id: number; session_id: number }>(
-          "SELECT id, session_id FROM session_items WHERE id = ?"
-        )
-        .get(request.params.itemId);
-      if (!item || item.session_id !== sessionId) {
-        return reply.code(404).send({ error: "Session item not found" });
-      }
-      db.prepare("DELETE FROM session_items WHERE id = ?").run(request.params.itemId);
-      return loadSessionDetail(sessionId);
-    }
-  );
-
-  app.delete<{ Params: { id: string } }>(
-    "/api/sessions/:id",
-    async (request, reply) => {
-      db.prepare("DELETE FROM sessions WHERE id = ?").run(request.params.id);
       return reply.code(204).send();
     }
   );

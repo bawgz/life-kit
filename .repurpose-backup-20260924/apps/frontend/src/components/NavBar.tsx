@@ -6,12 +6,18 @@ export default function NavBar() {
   return (
     <nav className="topnav">
       <div className="topnav-inner">
-        <Link to="/" className="brand">
+        <Link to="/plans" className="brand">
           life-kit<span className="dot">.</span>
         </Link>
         <div className="tabs">
-          <NavLink to="/" end className={({ isActive }) => `tab${isActive ? " active" : ""}`}>
-            Workouts
+          <NavLink to="/plans" className={({ isActive }) => `tab${isActive ? " active" : ""}`}>
+            Plans
+          </NavLink>
+          <NavLink
+            to="/calendar"
+            className={({ isActive }) => `tab${isActive ? " active" : ""}`}
+          >
+            Calendar
           </NavLink>
           <NavLink
             to="/sessions"

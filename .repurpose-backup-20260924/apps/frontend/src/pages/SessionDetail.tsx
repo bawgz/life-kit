@@ -74,8 +74,8 @@ function initialForm(s: SessionDetailType): LogForm {
     for (const set of item.sets) {
       const d = draft?.sets[set.id];
       sets[set.id] = {
-        weight: d?.weight ?? prefilled(set, "weight"),
-        reps: d?.reps ?? prefilled(set, "reps"),
+        weight: d?.weight ?? (set.weight != null ? String(set.weight) : ""),
+        reps: d?.reps ?? (set.reps != null ? String(set.reps) : ""),
       };
     }
   }
@@ -88,26 +88,14 @@ function initialForm(s: SessionDetailType): LogForm {
   };
 }
 
-/**
- * Like the workout form: set rows start pre-filled with their goal
- * weight/reps so Luke only edits where actuals differ. Server actuals win
- * over targets; an empty string means no goal either.
- */
-function prefilled(set: SetType, field: "weight" | "reps"): string {
-  const actual = field === "weight" ? set.weight : set.reps;
-  if (actual != null) return String(actual);
-  const target = field === "weight" ? set.targetWeight : set.targetReps;
-  return target != null ? String(target) : "";
-}
-
 /** Merge a fresh server session into the form, keeping unsaved edits. */
 function mergeForm(s: SessionDetailType, prev: LogForm): LogForm {
   const sets: Record<number, { weight: string; reps: string }> = {};
   for (const item of s.items) {
     for (const set of item.sets) {
       sets[set.id] = prev.sets[set.id] ?? {
-        weight: prefilled(set, "weight"),
-        reps: prefilled(set, "reps"),
+        weight: set.weight != null ? String(set.weight) : "",
+        reps: set.reps != null ? String(set.reps) : "",
       };
     }
   }
@@ -266,7 +254,7 @@ export default function SessionDetail() {
     const w = parseNum(cur.weight);
     const r = parseNum(cur.reps);
     if (w === "invalid" || r === "invalid") {
-      // Revert the bad field to the server value (or the goal it was prefilled with).
+      // Revert the bad field to the server value.
       setForm((prev) =>
         prev
           ? {
@@ -274,8 +262,8 @@ export default function SessionDetail() {
               sets: {
                 ...prev.sets,
                 [set.id]: {
-                  weight: prefilled(set, "weight"),
-                  reps: prefilled(set, "reps"),
+                  weight: set.weight != null ? String(set.weight) : "",
+                  reps: set.reps != null ? String(set.reps) : "",
                 },
               },
             }

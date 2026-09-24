@@ -23,22 +23,18 @@ export default function Login() {
 
   return (
     <div className="centered-page">
-      <form className="card login-card" onSubmit={handleSubmit}>
-        <h1>
-          life-kit<span className="dot">.</span>
-        </h1>
-        <div className="field">
-          <span>Password</span>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoFocus
-          />
-        </div>
+      <form className="card" onSubmit={handleSubmit}>
+        <h1>life-kit</h1>
+        <label htmlFor="password">Password</label>
+        <input
+          id="password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoFocus
+        />
         {error && <p className="error">{error}</p>}
-        <button type="submit" className="btn btn-primary" disabled={submitting}>
+        <button type="submit" disabled={submitting}>
           {submitting ? "Signing in..." : "Sign in"}
         </button>
       </form>

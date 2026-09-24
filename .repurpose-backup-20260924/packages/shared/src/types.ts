@@ -118,14 +118,6 @@ export interface CreatePlanItemInput {
   sets: CreatePlanItemSetInput[];
 }
 
-export interface UpdatePlanItemInput {
-  name?: string;
-  orderIndex?: number;
-  notes?: string | null;
-}
-
-export type UpdatePlanItemSetInput = Partial<CreatePlanItemSetInput>;
-
 export interface CreatePlanRequest {
   name: string;
   description?: string | null;

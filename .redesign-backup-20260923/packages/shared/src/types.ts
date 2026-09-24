@@ -14,8 +14,6 @@ export interface Plan {
   id: Id;
   name: string;
   description: string | null;
-  /** Workout family: "upper" | "legs" | null. Drives leg-only features like knee checks. */
-  kind: string | null;
   createdAt: ISODateTime;
 }
 
@@ -55,19 +53,10 @@ export interface ScheduledWorkout {
 export interface Session {
   id: Id;
   scheduledWorkoutId: Id | null;
-  /** Plan this session was started from (null for ad-hoc). */
-  planId: Id | null;
-  /** Denormalized for list views: plan name / kind via plan or scheduled workout. */
-  planName: string | null;
-  planKind: string | null;
   date: ISODate;
   startedAt: ISODateTime | null;
   completedAt: ISODateTime | null;
   notes: string | null;
-  /** Knee pain 0-10 (leg days): during, after, next morning. */
-  painDuring: number | null;
-  painAfter: number | null;
-  painNextMorning: number | null;
 }
 
 export interface SessionItem {
@@ -88,11 +77,6 @@ export interface SessionItemSet {
   distanceMeters: number | null;
   extra: ExtraMetrics | null;
   completedAt: ISODateTime | null;
-  /** Target snapshot copied from the plan when the session was started (null for ad-hoc sets). */
-  targetReps: number | null;
-  targetWeight: number | null;
-  targetDurationSeconds: number | null;
-  targetDistanceMeters: number | null;
 }
 
 /** A session with its items and sets nested, for GET /sessions/:id. */
@@ -118,24 +102,13 @@ export interface CreatePlanItemInput {
   sets: CreatePlanItemSetInput[];
 }
 
-export interface UpdatePlanItemInput {
-  name?: string;
-  orderIndex?: number;
-  notes?: string | null;
-}
-
-export type UpdatePlanItemSetInput = Partial<CreatePlanItemSetInput>;
-
 export interface CreatePlanRequest {
   name: string;
   description?: string | null;
-  kind?: string | null;
   items?: CreatePlanItemInput[];
 }
 
-export type UpdatePlanRequest = Partial<
-  Pick<CreatePlanRequest, "name" | "description" | "kind">
->;
+export type UpdatePlanRequest = Partial<Pick<CreatePlanRequest, "name" | "description">>;
 
 export interface CreateScheduledWorkoutRequest {
   planId?: Id | null;
@@ -154,17 +127,11 @@ export interface CreateSessionRequest {
   planId?: Id | null; // if set (and no scheduledWorkoutId), pre-populate items from this plan
   date: ISODate;
   notes?: string | null;
-  painDuring?: number | null;
-  painAfter?: number | null;
-  painNextMorning?: number | null;
 }
 
 export interface UpdateSessionRequest {
   notes?: string | null;
   completedAt?: ISODateTime | null;
-  painDuring?: number | null;
-  painAfter?: number | null;
-  painNextMorning?: number | null;
 }
 
 export interface CreateSessionItemRequest {

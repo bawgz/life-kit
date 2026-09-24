@@ -1,6 +1,4 @@
 import type {
-  CreatePlanItemInput,
-  CreatePlanItemSetInput,
   CreatePlanRequest,
   CreateScheduledWorkoutRequest,
   CreateSessionItemRequest,
@@ -11,12 +9,7 @@ import type {
   ScheduledWorkout,
   Session,
   SessionDetail,
-  UpdatePlanItemInput,
-  UpdatePlanItemSetInput,
-  UpdatePlanRequest,
   UpdateScheduledWorkoutRequest,
-  UpdateSessionItemSetRequest,
-  UpdateSessionRequest,
 } from "@life-kit/shared";
 
 class ApiError extends Error {
@@ -50,30 +43,6 @@ export const api = {
   listPlans: () => request<Plan[]>("GET", "/plans"),
   getPlan: (id: number) => request<PlanDetail>("GET", `/plans/${id}`),
   createPlan: (body: CreatePlanRequest) => request<PlanDetail>("POST", "/plans", body),
-  updatePlan: (id: number, body: UpdatePlanRequest) =>
-    request<PlanDetail>("PATCH", `/plans/${id}`, body),
-  deletePlan: (id: number) => request<void>("DELETE", `/plans/${id}`),
-  addPlanItem: (planId: number, body: CreatePlanItemInput) =>
-    request<PlanDetail>("POST", `/plans/${planId}/items`, body),
-  updatePlanItem: (planId: number, itemId: number, body: UpdatePlanItemInput) =>
-    request<PlanDetail>("PATCH", `/plans/${planId}/items/${itemId}`, body),
-  deletePlanItem: (planId: number, itemId: number) =>
-    request<void>("DELETE", `/plans/${planId}/items/${itemId}`),
-  addPlanItemSet: (planId: number, itemId: number, body: CreatePlanItemSetInput) =>
-    request<PlanDetail>("POST", `/plans/${planId}/items/${itemId}/sets`, body),
-  updatePlanItemSet: (
-    planId: number,
-    itemId: number,
-    setId: number,
-    body: UpdatePlanItemSetInput
-  ) =>
-    request<PlanDetail>(
-      "PATCH",
-      `/plans/${planId}/items/${itemId}/sets/${setId}`,
-      body
-    ),
-  deletePlanItemSet: (planId: number, itemId: number, setId: number) =>
-    request<void>("DELETE", `/plans/${planId}/items/${itemId}/sets/${setId}`),
 
   listScheduledWorkouts: (from?: string, to?: string) => {
     const params = new URLSearchParams();
@@ -97,34 +66,12 @@ export const api = {
   getSession: (id: number) => request<SessionDetail>("GET", `/sessions/${id}`),
   createSession: (body: CreateSessionRequest) =>
     request<SessionDetail>("POST", "/sessions", body),
-  updateSession: (id: number, body: UpdateSessionRequest) =>
-    request<SessionDetail>("PATCH", `/sessions/${id}`, body),
-  deleteSession: (id: number) =>
-    request<void>("DELETE", `/sessions/${id}`),
   addSessionItem: (sessionId: number, body: CreateSessionItemRequest) =>
     request<SessionDetail>("POST", `/sessions/${sessionId}/items`, body),
-  deleteSessionItem: (sessionId: number, itemId: number) =>
-    request<SessionDetail>("DELETE", `/sessions/${sessionId}/items/${itemId}`),
   logSet: (sessionId: number, sessionItemId: number, body: CreateSessionItemSetRequest) =>
     request<SessionDetail>(
       "POST",
       `/sessions/${sessionId}/items/${sessionItemId}/sets`,
       body
-    ),
-  updateSet: (
-    sessionId: number,
-    sessionItemId: number,
-    setId: number,
-    body: UpdateSessionItemSetRequest
-  ) =>
-    request<SessionDetail>(
-      "PATCH",
-      `/sessions/${sessionId}/items/${sessionItemId}/sets/${setId}`,
-      body
-    ),
-  deleteSet: (sessionId: number, sessionItemId: number, setId: number) =>
-    request<void>(
-      "DELETE",
-      `/sessions/${sessionId}/items/${sessionItemId}/sets/${setId}`
     ),
 };

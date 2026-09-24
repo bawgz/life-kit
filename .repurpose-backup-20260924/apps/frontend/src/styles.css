@@ -726,47 +726,6 @@ textarea {
   margin: 0.15rem 0;
 }
 
-/* ---------- template preset sheets ---------- */
-
-.preset-exercise {
-  margin-bottom: 0.9rem;
-}
-
-.preset-exercise:last-child {
-  margin-bottom: 0.4rem;
-}
-
-.preset-exercise-name {
-  font-weight: 700;
-  font-size: 1rem;
-  letter-spacing: -0.01em;
-}
-
-.preset-line {
-  font-size: 0.9rem;
-  color: var(--dim);
-  margin-top: 0.15rem;
-}
-
-.preset-row {
-  display: grid;
-  grid-template-columns: 2.2rem 1fr;
-  gap: 0.5rem;
-  align-items: baseline;
-  padding: 0.25rem 0;
-  border-bottom: 1px dashed var(--line);
-  font-size: 0.95rem;
-}
-
-.preset-row:last-of-type {
-  border-bottom: none;
-}
-
-.preset-empty {
-  font-size: 0.85rem;
-  margin-top: 0.15rem;
-}
-
 .divider {
   border: none;
   border-top: 1px solid var(--line);

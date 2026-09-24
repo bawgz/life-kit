@@ -1,6 +1,4 @@
 import type {
-  CreatePlanItemInput,
-  CreatePlanItemSetInput,
   CreatePlanRequest,
   CreateScheduledWorkoutRequest,
   CreateSessionItemRequest,
@@ -11,9 +9,6 @@ import type {
   ScheduledWorkout,
   Session,
   SessionDetail,
-  UpdatePlanItemInput,
-  UpdatePlanItemSetInput,
-  UpdatePlanRequest,
   UpdateScheduledWorkoutRequest,
   UpdateSessionItemSetRequest,
   UpdateSessionRequest,
@@ -50,30 +45,6 @@ export const api = {
   listPlans: () => request<Plan[]>("GET", "/plans"),
   getPlan: (id: number) => request<PlanDetail>("GET", `/plans/${id}`),
   createPlan: (body: CreatePlanRequest) => request<PlanDetail>("POST", "/plans", body),
-  updatePlan: (id: number, body: UpdatePlanRequest) =>
-    request<PlanDetail>("PATCH", `/plans/${id}`, body),
-  deletePlan: (id: number) => request<void>("DELETE", `/plans/${id}`),
-  addPlanItem: (planId: number, body: CreatePlanItemInput) =>
-    request<PlanDetail>("POST", `/plans/${planId}/items`, body),
-  updatePlanItem: (planId: number, itemId: number, body: UpdatePlanItemInput) =>
-    request<PlanDetail>("PATCH", `/plans/${planId}/items/${itemId}`, body),
-  deletePlanItem: (planId: number, itemId: number) =>
-    request<void>("DELETE", `/plans/${planId}/items/${itemId}`),
-  addPlanItemSet: (planId: number, itemId: number, body: CreatePlanItemSetInput) =>
-    request<PlanDetail>("POST", `/plans/${planId}/items/${itemId}/sets`, body),
-  updatePlanItemSet: (
-    planId: number,
-    itemId: number,
-    setId: number,
-    body: UpdatePlanItemSetInput
-  ) =>
-    request<PlanDetail>(
-      "PATCH",
-      `/plans/${planId}/items/${itemId}/sets/${setId}`,
-      body
-    ),
-  deletePlanItemSet: (planId: number, itemId: number, setId: number) =>
-    request<void>("DELETE", `/plans/${planId}/items/${itemId}/sets/${setId}`),
 
   listScheduledWorkouts: (from?: string, to?: string) => {
     const params = new URLSearchParams();

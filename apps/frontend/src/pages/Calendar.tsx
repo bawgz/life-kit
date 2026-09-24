@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { Plan, ScheduledWorkout } from "@life-kit/shared";
 import { api } from "../api.js";
 
@@ -13,7 +13,16 @@ function startOfWeek(): Date {
   return d;
 }
 
+function prettyDate(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export default function Calendar() {
+  const navigate = useNavigate();
   const [from, setFrom] = useState(isoDate(startOfWeek()));
   const [to, setTo] = useState(() => {
     const d = startOfWeek();
@@ -40,6 +49,7 @@ export default function Calendar() {
       planId: planId === "" ? null : planId,
       scheduledDate,
     });
+    setPlanId("");
     refresh();
   }
 
@@ -48,50 +58,88 @@ export default function Calendar() {
     refresh();
   }
 
+  async function startWorkout(w: ScheduledWorkout) {
+    const session = await api.createSession({
+      scheduledWorkoutId: w.id,
+      date: w.scheduledDate,
+    });
+    navigate(`/sessions/${session.id}`);
+  }
+
   const planName = (id: number | null) => plans.find((p) => p.id === id)?.name ?? "Ad-hoc";
 
   return (
     <div>
-      <h1>Calendar</h1>
-
-      <div className="inline-form">
-        <label>
-          From <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          To <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
+      <div className="page-head">
+        <p className="kicker">Schedule</p>
+        <h1 className="display">Calendar</h1>
       </div>
 
-      <ul className="list">
-        {workouts.map((w) => (
-          <li key={w.id}>
-            <strong>{w.scheduledDate}</strong> — {planName(w.planId)}{" "}
-            <span className={`badge badge-${w.status}`}>{w.status}</span>{" "}
-            {w.status === "planned" && (
-              <>
-                <button className="link-button" onClick={() => setStatus(w.id, "skipped")}>
-                  Skip
-                </button>
-              </>
-            )}
-          </li>
-        ))}
-        {workouts.length === 0 && <p className="muted">Nothing scheduled in this range.</p>}
-      </ul>
+      <div className="card">
+        <div className="inline-form">
+          <div className="field" style={{ marginBottom: 0 }}>
+            <span>From</span>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <span>To</span>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      {workouts.length === 0 ? (
+        <p className="muted">Nothing scheduled in this range.</p>
+      ) : (
+        <div className="card">
+          <ul className="list-plain">
+            {workouts.map((w) => (
+              <li className="plan-row" key={w.id}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{prettyDate(w.scheduledDate)}</div>
+                  <div className="muted mono" style={{ fontSize: "0.82rem" }}>
+                    {planName(w.planId)}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "0.6rem", alignItems: "center" }}>
+                  <span className={`badge badge-${w.status}`}>{w.status}</span>
+                  {w.status === "planned" && (
+                    <>
+                      <button className="link-button" onClick={() => startWorkout(w)}>
+                        Start
+                      </button>
+                      <button className="link-button" onClick={() => setStatus(w.id, "skipped")}>
+                        Skip
+                      </button>
+                    </>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <form className="card" onSubmit={handleSchedule}>
-        <h2>Schedule a workout</h2>
-        <select value={planId} onChange={(e) => setPlanId(e.target.value ? Number(e.target.value) : "")}>
-          <option value="">Ad-hoc (no plan)</option>
-          {plans.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
-        <button type="submit">Schedule</button>
+        <p className="section-label">Schedule a workout</p>
+        <div className="field">
+          <span>Plan</span>
+          <select value={planId} onChange={(e) => setPlanId(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">Ad-hoc (no plan)</option>
+            {plans.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <span>Date</span>
+          <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
+        </div>
+        <button type="submit" className="btn btn-primary">
+          Schedule
+        </button>
       </form>
 
       <p className="muted">

@@ -4,6 +4,7 @@ import NavBar from "./components/NavBar.js";
 import Login from "./pages/Login.js";
 import Plans from "./pages/Plans.js";
 import PlanDetail from "./pages/PlanDetail.js";
+import Calendar from "./pages/Calendar.js";
 import Sessions from "./pages/Sessions.js";
 import SessionDetail from "./pages/SessionDetail.js";
 
@@ -18,11 +19,13 @@ function AppRoutes() {
       <NavBar />
       <main className="content">
         <Routes>
-          <Route path="/" element={<Plans />} />
+          <Route path="/" element={<Navigate to="/calendar" replace />} />
+          <Route path="/calendar" element={<Calendar />} />
+          <Route path="/plans" element={<Plans />} />
           <Route path="/plans/:id" element={<PlanDetail />} />
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/sessions/:id" element={<SessionDetail />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/calendar" replace />} />
         </Routes>
       </main>
     </>

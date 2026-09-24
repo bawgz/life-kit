@@ -8,17 +8,8 @@ function jsonResult(data: unknown) {
 
 const extraMetricsSchema = z
   .record(z.union([z.string(), z.number(), z.boolean()]))
-  .nullish()
+  .optional()
   .describe("Any metric that isn't reps/weight/duration/distance, e.g. { rpe: 8 }");
-
-/** Accepts a number, null, or omitted — callers shouldn't have to know which. */
-const num = z.number().nullish();
-
-const painFields = {
-  painDuring: num.describe("Knee pain 0-10 during the workout (leg days)"),
-  painAfter: num.describe("Knee pain 0-10 after the workout (leg days)"),
-  painNextMorning: num.describe("Knee pain 0-10 the next morning (leg days)"),
-};
 
 export function registerTools(server: McpServer): void {
   server.registerTool(
@@ -44,10 +35,6 @@ export function registerTools(server: McpServer): void {
       inputSchema: {
         name: z.string(),
         description: z.string().optional(),
-        kind: z
-          .string()
-          .nullish()
-          .describe("Workout family: 'upper' or 'legs'. Legs enables knee-pain tracking."),
         items: z
           .array(
             z.object({
@@ -57,10 +44,10 @@ export function registerTools(server: McpServer): void {
               sets: z.array(
                 z.object({
                   setNumber: z.number(),
-                  targetReps: num,
-                  targetWeight: num,
-                  targetDurationSeconds: num,
-                  targetDistanceMeters: num,
+                  targetReps: z.number().optional(),
+                  targetWeight: z.number().optional(),
+                  targetDurationSeconds: z.number().optional(),
+                  targetDistanceMeters: z.number().optional(),
                   targetExtra: extraMetricsSchema,
                 })
               ),
@@ -70,47 +57,6 @@ export function registerTools(server: McpServer): void {
       },
     },
     async (args) => jsonResult(await api.post("/api/plans", args))
-  );
-
-  server.registerTool(
-    "update_plan",
-    {
-      description:
-        "Update a workout plan's name, description, or kind ('upper' or 'legs').",
-      inputSchema: {
-        planId: z.number(),
-        name: z.string().optional(),
-        description: z.string().nullish(),
-        kind: z.string().nullish(),
-      },
-    },
-    async ({ planId, ...body }) =>
-      jsonResult(await api.patch(`/api/plans/${planId}`, body))
-  );
-
-  server.registerTool(
-    "update_plan_item_set",
-    {
-      description:
-        "Update one set's goal reps/weight in a workout plan template. Goal weights round up to the nearest 5 (no half weights).",
-      inputSchema: {
-        planId: z.number(),
-        planItemId: z.number(),
-        planItemSetId: z.number(),
-        setNumber: z.number().optional(),
-        targetReps: num,
-        targetWeight: num.describe("Goal weight in lbs; rounds up to the nearest 5"),
-        targetDurationSeconds: num,
-        targetDistanceMeters: num,
-      },
-    },
-    async ({ planId, planItemId, planItemSetId, ...body }) =>
-      jsonResult(
-        await api.patch(
-          `/api/plans/${planId}/items/${planItemId}/sets/${planItemSetId}`,
-          body
-        )
-      )
   );
 
   server.registerTool(
@@ -157,38 +103,9 @@ export function registerTools(server: McpServer): void {
         planId: z.number().optional(),
         date: z.string().describe("ISO date"),
         notes: z.string().optional(),
-        ...painFields,
       },
     },
     async (args) => jsonResult(await api.post("/api/sessions", args))
-  );
-
-  server.registerTool(
-    "update_session",
-    {
-      description:
-        "Update a session's notes, knee-pain scores, or completion time. Pain can be recorded during the workout or added later (e.g. next-morning score).",
-      inputSchema: {
-        sessionId: z.number(),
-        notes: z.string().nullish(),
-        completedAt: z.string().nullish().describe("ISO datetime"),
-        ...painFields,
-      },
-    },
-    async ({ sessionId, ...body }) =>
-      jsonResult(await api.patch(`/api/sessions/${sessionId}`, body))
-  );
-
-  server.registerTool(
-    "delete_session",
-    {
-      description: "Delete a session and all its items and sets. Cannot be undone.",
-      inputSchema: { sessionId: z.number() },
-    },
-    async ({ sessionId }) => {
-      await api.delete(`/api/sessions/${sessionId}`);
-      return jsonResult({ ok: true, deletedSessionId: sessionId });
-    }
   );
 
   server.registerTool(
@@ -215,10 +132,10 @@ export function registerTools(server: McpServer): void {
         sessionId: z.number(),
         sessionItemId: z.number(),
         setNumber: z.number(),
-        reps: num,
-        weight: num,
-        durationSeconds: num,
-        distanceMeters: num,
+        reps: z.number().optional(),
+        weight: z.number().optional(),
+        durationSeconds: z.number().optional(),
+        distanceMeters: z.number().optional(),
         extra: extraMetricsSchema,
       },
     },

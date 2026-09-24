@@ -1,14 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type {
   CreatePlanItemInput,
-  CreatePlanItemSetInput,
   CreatePlanRequest,
   Plan,
   PlanDetail,
   PlanItem,
   PlanItemSet,
-  UpdatePlanItemInput,
-  UpdatePlanItemSetInput,
   UpdatePlanRequest,
 } from "@life-kit/shared";
 import { db, parseJson, toJson } from "../db/index.js";
@@ -113,22 +110,13 @@ function insertPlanItems(planId: number, items: CreatePlanItemInput[]): void {
         planItemId,
         set.setNumber,
         set.targetReps ?? null,
-        roundUp5(set.targetWeight),
+        set.targetWeight ?? null,
         set.targetDurationSeconds ?? null,
         set.targetDistanceMeters ?? null,
         toJson(set.targetExtra)
       );
     }
   }
-}
-
-/**
- * Luke's rule: no half weights — goal weights always round up to the nearest 5.
- * Applies to plan targets only; logged actuals stay exact.
- */
-function roundUp5(w: number | null | undefined): number | null {
-  if (w == null || !Number.isFinite(w)) return null;
-  return Math.ceil(w / 5) * 5;
 }
 
 export function registerPlanRoutes(root: FastifyInstance): void {
@@ -208,7 +196,7 @@ export function registerPlanRoutes(root: FastifyInstance): void {
 
   app.patch<{
     Params: { id: string; itemId: string };
-    Body: UpdatePlanItemInput;
+    Body: { name?: string; orderIndex?: number; notes?: string | null };
   }>(
     "/api/plans/:id/items/:itemId",
     async (request, reply) => {
@@ -232,103 +220,6 @@ export function registerPlanRoutes(root: FastifyInstance): void {
     "/api/plans/:id/items/:itemId",
     async (request, reply) => {
       db.prepare("DELETE FROM plan_items WHERE id = ?").run(request.params.itemId);
-      return reply.code(204).send();
-    }
-  );
-
-  app.post<{
-    Params: { id: string; itemId: string };
-    Body: CreatePlanItemSetInput;
-  }>(
-    "/api/plans/:id/items/:itemId/sets",
-    async (request, reply) => {
-      const planId = Number(request.params.id);
-      const itemId = Number(request.params.itemId);
-      const item = db
-        .prepare<[number, number], { id: number }>(
-          "SELECT id FROM plan_items WHERE id = ? AND plan_id = ?"
-        )
-        .get(itemId, planId);
-      if (!item) return reply.code(404).send({ error: "Plan item not found" });
-
-      const {
-        setNumber,
-        targetReps,
-        targetWeight,
-        targetDurationSeconds,
-        targetDistanceMeters,
-        targetExtra,
-      } = request.body;
-      db.prepare(
-        `INSERT INTO plan_item_sets
-           (plan_item_id, set_number, target_reps, target_weight,
-            target_duration_seconds, target_distance_meters, target_extra)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        itemId,
-        setNumber,
-        targetReps ?? null,
-        roundUp5(targetWeight),
-        targetDurationSeconds ?? null,
-        targetDistanceMeters ?? null,
-        toJson(targetExtra)
-      );
-      return reply.code(201).send(loadPlanDetail(planId));
-    }
-  );
-
-  app.patch<{
-    Params: { id: string; itemId: string; setId: string };
-    Body: UpdatePlanItemSetInput;
-  }>(
-    "/api/plans/:id/items/:itemId/sets/:setId",
-    async (request, reply) => {
-      const planId = Number(request.params.id);
-      const itemId = Number(request.params.itemId);
-      const existing = db
-        .prepare<[string], PlanItemSetRow>(
-          "SELECT * FROM plan_item_sets WHERE id = ?"
-        )
-        .get(request.params.setId);
-      if (!existing || existing.plan_item_id !== itemId) {
-        return reply.code(404).send({ error: "Plan set not found" });
-      }
-
-      const {
-        setNumber,
-        targetReps,
-        targetWeight,
-        targetDurationSeconds,
-        targetDistanceMeters,
-        targetExtra,
-      } = request.body;
-      db.prepare(
-        `UPDATE plan_item_sets SET
-           set_number = ?, target_reps = ?, target_weight = ?,
-           target_duration_seconds = ?, target_distance_meters = ?,
-           target_extra = ?
-         WHERE id = ?`
-      ).run(
-        setNumber ?? existing.set_number,
-        targetReps !== undefined ? targetReps : existing.target_reps,
-        targetWeight !== undefined ? roundUp5(targetWeight) : existing.target_weight,
-        targetDurationSeconds !== undefined
-          ? targetDurationSeconds
-          : existing.target_duration_seconds,
-        targetDistanceMeters !== undefined
-          ? targetDistanceMeters
-          : existing.target_distance_meters,
-        targetExtra !== undefined ? toJson(targetExtra) : existing.target_extra,
-        request.params.setId
-      );
-      return loadPlanDetail(planId);
-    }
-  );
-
-  app.delete<{ Params: { id: string; itemId: string; setId: string } }>(
-    "/api/plans/:id/items/:itemId/sets/:setId",
-    async (request, reply) => {
-      db.prepare("DELETE FROM plan_item_sets WHERE id = ?").run(request.params.setId);
       return reply.code(204).send();
     }
   );
