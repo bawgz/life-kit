@@ -109,12 +109,18 @@ function EditItem({
   tick,
   onChanged,
   onError,
+  isFirst,
+  isLast,
+  onMove,
 }: {
   planId: number;
   item: PlanItemType & { sets: PlanItemSetType[] };
   tick: number;
   onChanged: (p: PlanDetailType) => void;
   onError: (m: string) => void;
+  isFirst: boolean;
+  isLast: boolean;
+  onMove: (dir: -1 | 1) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
 
@@ -199,7 +205,25 @@ function EditItem({
           + Add set
         </button>
       </div>
-      <div style={{ marginTop: "0.6rem" }}>
+      <div style={{ marginTop: "0.6rem", display: "flex", gap: "1.25rem" }}>
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => onMove(-1)}
+          disabled={isFirst}
+          title="Move exercise up"
+        >
+          ↑ Up
+        </button>
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => onMove(1)}
+          disabled={isLast}
+          title="Move exercise down"
+        >
+          ↓ Down
+        </button>
         <button
           type="button"
           className={`link-button${confirming ? " danger" : ""}`}
@@ -287,6 +311,25 @@ export default function PlanDetail() {
     }
   }
 
+  async function moveItem(itemId: number, dir: -1 | 1) {
+    if (!plan) return;
+    const idx = plan.items.findIndex((i) => i.id === itemId);
+    const neighbor = plan.items[idx + dir];
+    if (idx < 0 || !neighbor) return;
+    const item = plan.items[idx];
+    try {
+      await api.updatePlanItem(planId, item.id, {
+        orderIndex: neighbor.orderIndex,
+      });
+      const updated = await api.updatePlanItem(planId, neighbor.id, {
+        orderIndex: item.orderIndex,
+      });
+      refresh(updated);
+    } catch (e) {
+      setError(errMsg(e));
+    }
+  }
+
   async function deletePlan() {
     if (!confirmDelete) {
       setConfirmDelete(true);
@@ -346,7 +389,7 @@ export default function PlanDetail() {
         </div>
       ) : (
         <>
-          {plan.items.map((item) => (
+          {plan.items.map((item, i) => (
             <EditItem
               key={`${item.id}-${tick}`}
               planId={planId}
@@ -354,6 +397,9 @@ export default function PlanDetail() {
               tick={tick}
               onChanged={refresh}
               onError={setError}
+              isFirst={i === 0}
+              isLast={i === plan.items.length - 1}
+              onMove={(dir) => moveItem(item.id, dir)}
             />
           ))}
 

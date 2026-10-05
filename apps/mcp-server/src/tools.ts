@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { PlanDetail } from "@life-kit/shared";
 import { api } from "./apiClient.js";
 
 function jsonResult(data: unknown) {
@@ -86,6 +87,60 @@ export function registerTools(server: McpServer): void {
     },
     async ({ planId, ...body }) =>
       jsonResult(await api.patch(`/api/plans/${planId}`, body))
+  );
+
+  server.registerTool(
+    "add_plan_item",
+    {
+      description:
+        "Add an exercise to an existing workout plan template, with per-set targets. Omit orderIndex to append at the end. Goal weights round up to the nearest 5 (no half weights).",
+      inputSchema: {
+        planId: z.number(),
+        name: z.string(),
+        orderIndex: z
+          .number()
+          .optional()
+          .describe("0-based position in the plan; defaults to the end"),
+        notes: z.string().optional(),
+        sets: z.array(
+          z.object({
+            setNumber: z.number(),
+            targetReps: num,
+            targetWeight: num.describe("Goal weight in lbs; rounds up to the nearest 5"),
+            targetDurationSeconds: num,
+            targetDistanceMeters: num,
+            targetExtra: extraMetricsSchema,
+          })
+        ),
+      },
+    },
+    async ({ planId, orderIndex, ...body }) => {
+      const index =
+        orderIndex ??
+        (await api.get<PlanDetail>(`/api/plans/${planId}`)).items.length;
+      return jsonResult(
+        await api.post(`/api/plans/${planId}/items`, { ...body, orderIndex: index })
+      );
+    }
+  );
+
+  server.registerTool(
+    "update_plan_item",
+    {
+      description:
+        "Update an exercise in a workout plan template: rename it, change its notes, or reorder it with orderIndex (0-based; use get_plan to see the current order). To move an exercise, swap orderIndex values with its neighbor.",
+      inputSchema: {
+        planId: z.number(),
+        planItemId: z.number(),
+        name: z.string().optional(),
+        orderIndex: z.number().optional(),
+        notes: z.string().nullish(),
+      },
+    },
+    async ({ planId, planItemId, ...body }) =>
+      jsonResult(
+        await api.patch(`/api/plans/${planId}/items/${planItemId}`, body)
+      )
   );
 
   server.registerTool(
