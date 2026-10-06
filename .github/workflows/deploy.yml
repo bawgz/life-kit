@@ -23,8 +23,8 @@ name: Deploy to production
 #   GCP_SSH_PRIVATE_KEY the private half of the keypair above
 on:
   workflow_dispatch:
-  # push:
-  #   branches: [main]
+  push:
+    branches: [main]
 
 jobs:
   deploy:
