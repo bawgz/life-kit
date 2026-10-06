@@ -97,9 +97,10 @@ export function registerScheduledWorkoutRoutes(root: FastifyInstance): void {
   app.delete<{ Params: { id: string } }>(
     "/api/scheduled-workouts/:id",
     async (request, reply) => {
-      db.prepare("DELETE FROM scheduled_workouts WHERE id = ?").run(
-        request.params.id
-      );
+      const result = db
+        .prepare("DELETE FROM scheduled_workouts WHERE id = ?")
+        .run(request.params.id);
+      if (result.changes === 0) return reply.code(404).send({ error: "Not found" });
       return reply.code(204).send();
     }
   );

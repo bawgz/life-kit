@@ -188,7 +188,8 @@ export function registerPlanRoutes(root: FastifyInstance): void {
   );
 
   app.delete<{ Params: { id: string } }>("/api/plans/:id", async (request, reply) => {
-    db.prepare("DELETE FROM plans WHERE id = ?").run(request.params.id);
+    const result = db.prepare("DELETE FROM plans WHERE id = ?").run(request.params.id);
+    if (result.changes === 0) return reply.code(404).send({ error: "Not found" });
     return reply.code(204).send();
   });
 
@@ -214,8 +215,10 @@ export function registerPlanRoutes(root: FastifyInstance): void {
     async (request, reply) => {
       const { name, orderIndex, notes } = request.body;
       const existing = db
-        .prepare<[string], PlanItemRow>("SELECT * FROM plan_items WHERE id = ?")
-        .get(request.params.itemId);
+        .prepare<[string, string], PlanItemRow>(
+          "SELECT * FROM plan_items WHERE id = ? AND plan_id = ?"
+        )
+        .get(request.params.itemId, request.params.id);
       if (!existing) return reply.code(404).send({ error: "Not found" });
 
       db.prepare("UPDATE plan_items SET name = ?, order_index = ?, notes = ? WHERE id = ?").run(
@@ -231,7 +234,12 @@ export function registerPlanRoutes(root: FastifyInstance): void {
   app.delete<{ Params: { id: string; itemId: string } }>(
     "/api/plans/:id/items/:itemId",
     async (request, reply) => {
-      db.prepare("DELETE FROM plan_items WHERE id = ?").run(request.params.itemId);
+      const result = db
+        .prepare("DELETE FROM plan_items WHERE id = ? AND plan_id = ?")
+        .run(request.params.itemId, request.params.id);
+      if (result.changes === 0) {
+        return reply.code(404).send({ error: "Plan item not found" });
+      }
       return reply.code(204).send();
     }
   );
@@ -286,11 +294,13 @@ export function registerPlanRoutes(root: FastifyInstance): void {
       const planId = Number(request.params.id);
       const itemId = Number(request.params.itemId);
       const existing = db
-        .prepare<[string], PlanItemSetRow>(
-          "SELECT * FROM plan_item_sets WHERE id = ?"
+        .prepare<[string, number, number], PlanItemSetRow>(
+          `SELECT s.* FROM plan_item_sets s
+           JOIN plan_items i ON i.id = s.plan_item_id
+           WHERE s.id = ? AND i.id = ? AND i.plan_id = ?`
         )
-        .get(request.params.setId);
-      if (!existing || existing.plan_item_id !== itemId) {
+        .get(request.params.setId, itemId, planId);
+      if (!existing) {
         return reply.code(404).send({ error: "Plan set not found" });
       }
 
@@ -328,7 +338,17 @@ export function registerPlanRoutes(root: FastifyInstance): void {
   app.delete<{ Params: { id: string; itemId: string; setId: string } }>(
     "/api/plans/:id/items/:itemId/sets/:setId",
     async (request, reply) => {
-      db.prepare("DELETE FROM plan_item_sets WHERE id = ?").run(request.params.setId);
+      const { id, itemId, setId } = request.params;
+      const result = db
+        .prepare(
+          `DELETE FROM plan_item_sets
+           WHERE id = ? AND plan_item_id IN
+             (SELECT id FROM plan_items WHERE id = ? AND plan_id = ?)`
+        )
+        .run(setId, itemId, id);
+      if (result.changes === 0) {
+        return reply.code(404).send({ error: "Plan set not found" });
+      }
       return reply.code(204).send();
     }
   );

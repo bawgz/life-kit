@@ -90,6 +90,19 @@ export function registerTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "delete_plan",
+    {
+      description:
+        "Delete a workout plan template and all its exercises and sets. Past sessions and scheduled workouts that used it are kept but unlinked. Cannot be undone.",
+      inputSchema: { planId: z.number() },
+    },
+    async ({ planId }) => {
+      await api.delete(`/api/plans/${planId}`);
+      return jsonResult({ ok: true, deletedPlanId: planId });
+    }
+  );
+
+  server.registerTool(
     "add_plan_item",
     {
       description:
@@ -144,6 +157,44 @@ export function registerTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "delete_plan_item",
+    {
+      description:
+        "Remove an exercise (and all its target sets) from a workout plan template. Returns the updated plan.",
+      inputSchema: {
+        planId: z.number(),
+        planItemId: z.number(),
+      },
+    },
+    async ({ planId, planItemId }) => {
+      await api.delete(`/api/plans/${planId}/items/${planItemId}`);
+      return jsonResult(await api.get(`/api/plans/${planId}`));
+    }
+  );
+
+  server.registerTool(
+    "add_plan_item_set",
+    {
+      description:
+        "Add a target set to an exercise in a workout plan template. Goal weights round up to the nearest 5 (no half weights).",
+      inputSchema: {
+        planId: z.number(),
+        planItemId: z.number(),
+        setNumber: z.number(),
+        targetReps: num,
+        targetWeight: num.describe("Goal weight in lbs; rounds up to the nearest 5"),
+        targetDurationSeconds: num,
+        targetDistanceMeters: num,
+        targetExtra: extraMetricsSchema,
+      },
+    },
+    async ({ planId, planItemId, ...body }) =>
+      jsonResult(
+        await api.post(`/api/plans/${planId}/items/${planItemId}/sets`, body)
+      )
+  );
+
+  server.registerTool(
     "update_plan_item_set",
     {
       description:
@@ -157,6 +208,7 @@ export function registerTools(server: McpServer): void {
         targetWeight: num.describe("Goal weight in lbs; rounds up to the nearest 5"),
         targetDurationSeconds: num,
         targetDistanceMeters: num,
+        targetExtra: extraMetricsSchema,
       },
     },
     async ({ planId, planItemId, planItemSetId, ...body }) =>
@@ -166,6 +218,25 @@ export function registerTools(server: McpServer): void {
           body
         )
       )
+  );
+
+  server.registerTool(
+    "delete_plan_item_set",
+    {
+      description:
+        "Remove one target set from an exercise in a workout plan template. Returns the updated plan.",
+      inputSchema: {
+        planId: z.number(),
+        planItemId: z.number(),
+        planItemSetId: z.number(),
+      },
+    },
+    async ({ planId, planItemId, planItemSetId }) => {
+      await api.delete(
+        `/api/plans/${planId}/items/${planItemId}/sets/${planItemSetId}`
+      );
+      return jsonResult(await api.get(`/api/plans/${planId}`));
+    }
   );
 
   server.registerTool(
@@ -199,6 +270,37 @@ export function registerTools(server: McpServer): void {
       return jsonResult(
         await api.get(`/api/scheduled-workouts${qs ? `?${qs}` : ""}`)
       );
+    }
+  );
+
+  server.registerTool(
+    "update_scheduled_workout",
+    {
+      description:
+        "Reschedule a planned workout to a new date, mark it completed or skipped, or change its notes.",
+      inputSchema: {
+        scheduledWorkoutId: z.number(),
+        scheduledDate: z.string().optional().describe("ISO date, e.g. 2026-09-22"),
+        status: z.enum(["planned", "completed", "skipped"]).optional(),
+        notes: z.string().nullish(),
+      },
+    },
+    async ({ scheduledWorkoutId, ...body }) =>
+      jsonResult(
+        await api.patch(`/api/scheduled-workouts/${scheduledWorkoutId}`, body)
+      )
+  );
+
+  server.registerTool(
+    "delete_scheduled_workout",
+    {
+      description:
+        "Remove a workout from the calendar. Sessions already started from it are kept but unlinked.",
+      inputSchema: { scheduledWorkoutId: z.number() },
+    },
+    async ({ scheduledWorkoutId }) => {
+      await api.delete(`/api/scheduled-workouts/${scheduledWorkoutId}`);
+      return jsonResult({ ok: true, deletedScheduledWorkoutId: scheduledWorkoutId });
     }
   );
 
@@ -283,6 +385,66 @@ export function registerTools(server: McpServer): void {
           `/api/sessions/${sessionId}/items/${sessionItemId}/sets`,
           body
         )
+      )
+  );
+
+  server.registerTool(
+    "update_session_set",
+    {
+      description:
+        "Correct a set already in a session (e.g. fix mistyped reps or weight). Use get_session to find the set's id.",
+      inputSchema: {
+        sessionId: z.number(),
+        sessionItemId: z.number(),
+        sessionItemSetId: z.number(),
+        setNumber: z.number().optional(),
+        reps: num,
+        weight: num,
+        durationSeconds: num,
+        distanceMeters: num,
+        extra: extraMetricsSchema,
+      },
+    },
+    async ({ sessionId, sessionItemId, sessionItemSetId, ...body }) =>
+      jsonResult(
+        await api.patch(
+          `/api/sessions/${sessionId}/items/${sessionItemId}/sets/${sessionItemSetId}`,
+          body
+        )
+      )
+  );
+
+  server.registerTool(
+    "delete_session_set",
+    {
+      description: "Remove one set from a session item. Returns the updated session.",
+      inputSchema: {
+        sessionId: z.number(),
+        sessionItemId: z.number(),
+        sessionItemSetId: z.number(),
+      },
+    },
+    async ({ sessionId, sessionItemId, sessionItemSetId }) => {
+      await api.delete(
+        `/api/sessions/${sessionId}/items/${sessionItemId}/sets/${sessionItemSetId}`
+      );
+      return jsonResult(await api.get(`/api/sessions/${sessionId}`));
+    }
+  );
+
+  server.registerTool(
+    "delete_session_item",
+    {
+      description:
+        "Remove an exercise (and all its sets) from a session, e.g. one that was skipped. Returns the updated session.",
+      inputSchema: {
+        sessionId: z.number(),
+        sessionItemId: z.number(),
+      },
+    },
+    async ({ sessionId, sessionItemId }) =>
+      jsonResult(
+        await api.delete(`/api/sessions/${sessionId}/items/${sessionItemId}`)
       )
   );
 

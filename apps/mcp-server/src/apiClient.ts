@@ -16,8 +16,10 @@ async function request<T>(
 ): Promise<T> {
   const res = await fetch(`${config.backendUrl}${path}`, {
     method,
+    // Only send a JSON content-type with a body: Fastify rejects an empty
+    // body declared as JSON, which breaks bodiless DELETEs.
     headers: {
-      "Content-Type": "application/json",
+      ...(body !== undefined && { "Content-Type": "application/json" }),
       Authorization: `Bearer ${config.backendApiToken}`,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,

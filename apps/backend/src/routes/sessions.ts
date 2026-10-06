@@ -316,10 +316,10 @@ export function registerSessionRoutes(root: FastifyInstance): void {
   }>("/api/sessions/:id/items/:itemId/sets", async (request, reply) => {
     const { itemId, id } = request.params;
     const item = db
-      .prepare<[string], { id: number }>(
-        "SELECT id FROM session_items WHERE id = ?"
+      .prepare<[string, string], { id: number }>(
+        "SELECT id FROM session_items WHERE id = ? AND session_id = ?"
       )
-      .get(itemId);
+      .get(itemId, id);
     if (!item) return reply.code(404).send({ error: "Session item not found" });
 
     const { setNumber, reps, weight, durationSeconds, distanceMeters, extra } =
@@ -377,12 +377,14 @@ export function registerSessionRoutes(root: FastifyInstance): void {
     Params: { id: string; itemId: string; setId: string };
     Body: UpdateSessionItemSetRequest;
   }>("/api/sessions/:id/items/:itemId/sets/:setId", async (request, reply) => {
-    const { id, setId } = request.params;
+    const { id, itemId, setId } = request.params;
     const existing = db
-      .prepare<[string], SessionItemSetRow>(
-        "SELECT * FROM session_item_sets WHERE id = ?"
+      .prepare<[string, string, string], SessionItemSetRow>(
+        `SELECT s.* FROM session_item_sets s
+         JOIN session_items i ON i.id = s.session_item_id
+         WHERE s.id = ? AND i.id = ? AND i.session_id = ?`
       )
-      .get(setId);
+      .get(setId, itemId, id);
     if (!existing) return reply.code(404).send({ error: "Set not found" });
 
     const { setNumber, reps, weight, durationSeconds, distanceMeters, extra } =
@@ -407,9 +409,17 @@ export function registerSessionRoutes(root: FastifyInstance): void {
   app.delete<{ Params: { id: string; itemId: string; setId: string } }>(
     "/api/sessions/:id/items/:itemId/sets/:setId",
     async (request, reply) => {
-      db.prepare("DELETE FROM session_item_sets WHERE id = ?").run(
-        request.params.setId
-      );
+      const { id, itemId, setId } = request.params;
+      const result = db
+        .prepare(
+          `DELETE FROM session_item_sets
+           WHERE id = ? AND session_item_id IN
+             (SELECT id FROM session_items WHERE id = ? AND session_id = ?)`
+        )
+        .run(setId, itemId, id);
+      if (result.changes === 0) {
+        return reply.code(404).send({ error: "Set not found" });
+      }
       return reply.code(204).send();
     }
   );
@@ -434,7 +444,10 @@ export function registerSessionRoutes(root: FastifyInstance): void {
   app.delete<{ Params: { id: string } }>(
     "/api/sessions/:id",
     async (request, reply) => {
-      db.prepare("DELETE FROM sessions WHERE id = ?").run(request.params.id);
+      const result = db
+        .prepare("DELETE FROM sessions WHERE id = ?")
+        .run(request.params.id);
+      if (result.changes === 0) return reply.code(404).send({ error: "Not found" });
       return reply.code(204).send();
     }
   );

@@ -29,7 +29,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const res = await fetch(`/api${path}`, {
     method,
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    // Only send a JSON content-type with a body: Fastify rejects an empty
+    // body declared as JSON, which breaks bodiless DELETEs.
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
