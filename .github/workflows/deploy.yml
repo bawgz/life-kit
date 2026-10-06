@@ -47,7 +47,8 @@ jobs:
         run: |-
           set -e
           install -m 600 /dev/null /tmp/deploy_key
-          printf '%s' "$SSH_KEY" > /tmp/deploy_key
+          printf '%s\n' "$SSH_KEY" > /tmp/deploy_key
+          ssh-keygen -y -f /tmp/deploy_key > /dev/null
           gcloud compute start-iap-tunnel life-kit 22 \
             --local-host-port=localhost:2222 \
             --zone=us-central1-a \
