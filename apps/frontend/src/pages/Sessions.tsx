@@ -1,7 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { Session, SessionDetail as SessionDetailType } from "@life-kit/shared";
+import type {
+  Session,
+  SessionDetail as SessionDetailType,
+  SessionItemSet,
+} from "@life-kit/shared";
 import { ApiError, api } from "../api.js";
+import { ExerciseTypeBadge } from "../components/ExerciseFields.js";
+import {
+  durationInputValue,
+  formatActual,
+  parseDuration,
+  parseNum,
+  weightPlaceholder,
+} from "../format.js";
+
+type SessionItemDetail = SessionDetailType["items"][number];
 
 function prettyDate(iso: string): string {
   return new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", {
@@ -9,10 +23,6 @@ function prettyDate(iso: string): string {
     month: "short",
     day: "numeric",
   });
-}
-
-function fmtSet(s: { weight: number | null; reps: number | null }): string {
-  return `${s.weight ?? "–"}×${s.reps ?? "–"}`;
 }
 
 function PainDot({ label, value }: { label: string; value: number | null }) {
@@ -38,7 +48,7 @@ function HistoryCard({ session, refresh }: { session: Session; refresh: () => vo
   const [nextMorning, setNextMorning] = useState("");
   const [editingSet, setEditingSet] = useState<number | null>(null);
   const [editWeight, setEditWeight] = useState("");
-  const [editReps, setEditReps] = useState("");
+  const [editAmount, setEditAmount] = useState(""); // reps, or time for timed
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,21 +86,33 @@ function HistoryCard({ session, refresh }: { session: Session; refresh: () => vo
     setNextMorning("");
   }
 
-  function startEditSet(set: { id: number; weight: number | null; reps: number | null }) {
+  function startEditSet(item: SessionItemDetail, set: SessionItemSet) {
     setEditingSet(set.id);
     setEditWeight(set.weight != null ? String(set.weight) : "");
-    setEditReps(set.reps != null ? String(set.reps) : "");
+    setEditAmount(
+      item.exerciseType === "timed"
+        ? durationInputValue(set.durationSeconds)
+        : set.reps != null
+          ? String(set.reps)
+          : ""
+    );
   }
 
-  async function saveEditSet(sessionItemId: number, setId: number) {
-    const w = editWeight.trim() === "" ? null : Number(editWeight);
-    const r = editReps.trim() === "" ? null : Number(editReps);
-    if ((w !== null && !Number.isFinite(w)) || (r !== null && !Number.isFinite(r))) {
-      setError("Numbers only in weight / reps.");
+  async function saveEditSet(item: SessionItemDetail, setId: number) {
+    const timed = item.exerciseType === "timed";
+    const w = parseNum(editWeight);
+    const amount = timed ? parseDuration(editAmount) : parseNum(editAmount);
+    if (w === "invalid" || amount === "invalid") {
+      setError(
+        timed && amount === "invalid"
+          ? "Time must be seconds (45) or minutes:seconds (1:30)."
+          : "Numbers only in weight / reps."
+      );
       return;
     }
     setEditingSet(null);
-    await updateDetail(api.updateSet(session.id, sessionItemId, setId, { weight: w, reps: r }));
+    const patch = timed ? { weight: w, durationSeconds: amount } : { weight: w, reps: amount };
+    await updateDetail(api.updateSet(session.id, item.id, setId, patch));
   }
 
   async function deleteSelf() {
@@ -125,7 +147,9 @@ function HistoryCard({ session, refresh }: { session: Session; refresh: () => vo
             <>
               {detail.items.map((item) => (
                 <div key={item.id}>
-                  <p className="history-exercise">{item.name}</p>
+                  <p className="history-exercise">
+                    {item.name} <ExerciseTypeBadge type={item.exerciseType} />
+                  </p>
                   <p className="history-sets">
                     {item.sets.map((s) =>
                       editingSet === s.id ? (
@@ -135,24 +159,24 @@ function HistoryCard({ session, refresh }: { session: Session; refresh: () => vo
                             style={{ width: "4rem", padding: "0.25rem 0.4rem", fontSize: "0.85rem" }}
                             value={editWeight}
                             onChange={(e) => setEditWeight(e.target.value)}
-                            placeholder="lbs"
+                            placeholder={weightPlaceholder(item.exerciseType)}
                             inputMode="decimal"
                             aria-label="Weight"
                           />{" "}
-                          ×{" "}
+                          {item.exerciseType === "timed" ? "for" : "×"}{" "}
                           <input
                             className="mono"
                             style={{ width: "3.5rem", padding: "0.25rem 0.4rem", fontSize: "0.85rem" }}
-                            value={editReps}
-                            onChange={(e) => setEditReps(e.target.value)}
-                            placeholder="reps"
-                            inputMode="decimal"
-                            aria-label="Reps"
+                            value={editAmount}
+                            onChange={(e) => setEditAmount(e.target.value)}
+                            placeholder={item.exerciseType === "timed" ? "0:45" : "reps"}
+                            inputMode={item.exerciseType === "timed" ? "text" : "decimal"}
+                            aria-label={item.exerciseType === "timed" ? "Time" : "Reps"}
                           />{" "}
                           <button
                             type="button"
                             className="link-button"
-                            onClick={() => saveEditSet(item.id, s.id)}
+                            onClick={() => saveEditSet(item, s.id)}
                           >
                             save
                           </button>{" "}
@@ -166,11 +190,11 @@ function HistoryCard({ session, refresh }: { session: Session; refresh: () => vo
                         </span>
                       ) : (
                         <span key={s.id}>
-                          {fmtSet(s)}{" "}
+                          {formatActual(s, item.exerciseType)}{" "}
                           <button
                             type="button"
                             className="link-button"
-                            onClick={() => startEditSet(s)}
+                            onClick={() => startEditSet(item, s)}
                             title="Edit this set"
                           >
                             edit

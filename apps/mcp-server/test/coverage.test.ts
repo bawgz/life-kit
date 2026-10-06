@@ -14,6 +14,7 @@ const TOOL_ROUTES: Record<string, string[]> = {
   create_plan: ["POST /api/plans"],
   update_plan: ["PATCH /api/plans/:id"],
   delete_plan: ["DELETE /api/plans/:id"],
+  progress_plan: ["POST /api/plans/:id/progress"],
   add_plan_item: ["POST /api/plans/:id/items"],
   update_plan_item: ["PATCH /api/plans/:id/items/:itemId"],
   delete_plan_item: ["DELETE /api/plans/:id/items/:itemId"],

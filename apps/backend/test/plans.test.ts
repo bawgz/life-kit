@@ -133,6 +133,55 @@ describe("plan items", () => {
   });
 });
 
+describe("exercise types", () => {
+  it("defaults to weighted", async () => {
+    const plan = await createPlan();
+    assert.equal(plan.items[0].exerciseType, "weighted");
+  });
+
+  it("stores the type on create, add, and update", async () => {
+    const plan = await createPlan({
+      items: [
+        {
+          name: "Plank",
+          exerciseType: "timed",
+          orderIndex: 0,
+          sets: [{ setNumber: 1, targetDurationSeconds: 60 }],
+        },
+      ],
+    });
+    assert.equal(plan.items[0].exerciseType, "timed");
+    assert.equal(plan.items[0].sets[0].targetDurationSeconds, 60);
+
+    const added = await api<PlanDetail>("POST", `/api/plans/${plan.id}/items`, {
+      name: "Pull-ups",
+      exerciseType: "bodyweight",
+      orderIndex: 1,
+      sets: [{ setNumber: 1, targetReps: 6, targetWeight: 22 }],
+    });
+    assert.equal(added.body.items[1].exerciseType, "bodyweight");
+    assert.equal(added.body.items[1].sets[0].targetWeight, 25, "added load still rounds up");
+
+    const pullups = added.body.items[1];
+    const changed = await api<PlanDetail>("PATCH", `/api/plans/${plan.id}/items/${pullups.id}`, {
+      exerciseType: "weighted",
+    });
+    assert.equal(changed.body.items[1].exerciseType, "weighted");
+    assert.equal(changed.body.items[1].name, "Pull-ups");
+  });
+
+  it("rejects an unknown type with a 400", async () => {
+    const plan = await createPlan();
+    const bad = { name: "x", exerciseType: "cardio", orderIndex: 0, sets: [] };
+    assert.equal((await api("POST", "/api/plans", { name: "P", items: [bad] })).status, 400);
+    assert.equal((await api("POST", `/api/plans/${plan.id}/items`, bad)).status, 400);
+    assert.equal(
+      (await api("PATCH", `/api/plans/${plan.id}/items/${plan.items[0].id}`, { exerciseType: "cardio" })).status,
+      400
+    );
+  });
+});
+
 describe("plan item sets", () => {
   it("adds, updates, and deletes a set", async () => {
     const plan = await createPlan();

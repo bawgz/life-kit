@@ -1,17 +1,21 @@
 import type { FastifyInstance } from "fastify";
 import type {
   CreatePlanItemInput,
+  ExerciseType,
   CreatePlanItemSetInput,
   CreatePlanRequest,
   Plan,
   PlanDetail,
   PlanItem,
   PlanItemSet,
+  ProgressResult,
   UpdatePlanItemInput,
   UpdatePlanItemSetInput,
   UpdatePlanRequest,
 } from "@life-kit/shared";
 import { db, parseJson, toJson } from "../db/index.js";
+import { exerciseTypeError, isValidExerciseType } from "../exerciseType.js";
+import { applyProgression } from "../progress.js";
 import { requireAuth } from "../middleware/auth.js";
 
 interface PlanRow {
@@ -25,8 +29,12 @@ interface PlanItemRow {
   id: number;
   plan_id: number;
   name: string;
+  exercise_type: ExerciseType;
   order_index: number;
   notes: string | null;
+  range_min: number | null;
+  range_max: number | null;
+  progress_note: string | null;
 }
 interface PlanItemSetRow {
   id: number;
@@ -51,8 +59,12 @@ const rowToPlanItem = (row: PlanItemRow): PlanItem => ({
   id: row.id,
   planId: row.plan_id,
   name: row.name,
+  exerciseType: row.exercise_type,
   orderIndex: row.order_index,
   notes: row.notes,
+  rangeMin: row.range_min,
+  rangeMax: row.range_max,
+  progressNote: row.progress_note,
 });
 
 const rowToPlanItemSet = (row: PlanItemSetRow): PlanItemSet => ({
@@ -95,8 +107,8 @@ function loadPlanDetail(planId: number): PlanDetail | null {
 
 function insertPlanItems(planId: number, items: CreatePlanItemInput[]): void {
   const insertItem = db.prepare(
-    `INSERT INTO plan_items (plan_id, name, order_index, notes)
-     VALUES (?, ?, ?, ?)`
+    `INSERT INTO plan_items (plan_id, name, exercise_type, order_index, notes, range_min, range_max)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
   const insertSet = db.prepare(
     `INSERT INTO plan_item_sets
@@ -106,7 +118,15 @@ function insertPlanItems(planId: number, items: CreatePlanItemInput[]): void {
   );
 
   for (const item of items) {
-    const itemResult = insertItem.run(planId, item.name, item.orderIndex, item.notes ?? null);
+    const itemResult = insertItem.run(
+      planId,
+      item.name,
+      item.exerciseType ?? "weighted",
+      item.orderIndex,
+      item.notes ?? null,
+      item.rangeMin ?? null,
+      item.rangeMax ?? null
+    );
     const planItemId = Number(itemResult.lastInsertRowid);
     for (const set of item.sets) {
       insertSet.run(
@@ -120,6 +140,19 @@ function insertPlanItems(planId: number, items: CreatePlanItemInput[]): void {
       );
     }
   }
+}
+
+/** Returns an error message if a range patch is invalid, else null. */
+function rangeError(min: unknown, max: unknown): string | null {
+  for (const v of [min, max]) {
+    if (v !== undefined && v !== null && !(Number.isInteger(v) && (v as number) > 0)) {
+      return "rangeMin and rangeMax must be positive whole numbers (or null)";
+    }
+  }
+  if (typeof min === "number" && typeof max === "number" && min > max) {
+    return "rangeMin can't be more than rangeMax";
+  }
+  return null;
 }
 
 /**
@@ -145,6 +178,11 @@ export function registerPlanRoutes(root: FastifyInstance): void {
     if (!name?.trim()) {
       return reply.code(400).send({ error: "name is required" });
     }
+    if (items?.some((i) => !isValidExerciseType(i.exerciseType))) {
+      return reply.code(400).send(exerciseTypeError);
+    }
+    const badRange = items?.map((i) => rangeError(i.rangeMin, i.rangeMax)).find(Boolean);
+    if (badRange) return reply.code(400).send({ error: badRange });
 
     const planId = db.transaction(() => {
       const result = db
@@ -187,6 +225,16 @@ export function registerPlanRoutes(root: FastifyInstance): void {
     }
   );
 
+  // Recompute every exercise's targets from logged history (also runs
+  // automatically when a session from this plan is finished).
+  app.post<{ Params: { id: string } }>("/api/plans/:id/progress", async (request, reply) => {
+    const planId = Number(request.params.id);
+    if (!loadPlanDetail(planId)) return reply.code(404).send({ error: "Not found" });
+    const changes = applyProgression(planId);
+    const result: ProgressResult = { plan: loadPlanDetail(planId)!, changes };
+    return result;
+  });
+
   app.delete<{ Params: { id: string } }>("/api/plans/:id", async (request, reply) => {
     const result = db.prepare("DELETE FROM plans WHERE id = ?").run(request.params.id);
     if (result.changes === 0) return reply.code(404).send({ error: "Not found" });
@@ -201,6 +249,11 @@ export function registerPlanRoutes(root: FastifyInstance): void {
         .prepare<[number], { id: number }>("SELECT id FROM plans WHERE id = ?")
         .get(planId);
       if (!plan) return reply.code(404).send({ error: "Plan not found" });
+      if (!isValidExerciseType(request.body.exerciseType)) {
+        return reply.code(400).send(exerciseTypeError);
+      }
+      const badRange = rangeError(request.body.rangeMin, request.body.rangeMax);
+      if (badRange) return reply.code(400).send({ error: badRange });
 
       db.transaction(() => insertPlanItems(planId, [request.body]))();
       return reply.code(201).send(loadPlanDetail(planId));
@@ -213,7 +266,10 @@ export function registerPlanRoutes(root: FastifyInstance): void {
   }>(
     "/api/plans/:id/items/:itemId",
     async (request, reply) => {
-      const { name, orderIndex, notes } = request.body;
+      const { name, exerciseType, orderIndex, notes, rangeMin, rangeMax } = request.body;
+      if (!isValidExerciseType(exerciseType)) {
+        return reply.code(400).send(exerciseTypeError);
+      }
       const existing = db
         .prepare<[string, string], PlanItemRow>(
           "SELECT * FROM plan_items WHERE id = ? AND plan_id = ?"
@@ -221,10 +277,22 @@ export function registerPlanRoutes(root: FastifyInstance): void {
         .get(request.params.itemId, request.params.id);
       if (!existing) return reply.code(404).send({ error: "Not found" });
 
-      db.prepare("UPDATE plan_items SET name = ?, order_index = ?, notes = ? WHERE id = ?").run(
+      const nextMin = rangeMin !== undefined ? rangeMin : existing.range_min;
+      const nextMax = rangeMax !== undefined ? rangeMax : existing.range_max;
+      const badRange = rangeError(nextMin, nextMax);
+      if (badRange) return reply.code(400).send({ error: badRange });
+
+      db.prepare(
+        `UPDATE plan_items SET name = ?, exercise_type = ?, order_index = ?, notes = ?,
+           range_min = ?, range_max = ?
+         WHERE id = ?`
+      ).run(
         name?.trim() ?? existing.name,
+        exerciseType ?? existing.exercise_type,
         orderIndex ?? existing.order_index,
         notes !== undefined ? notes : existing.notes,
+        nextMin,
+        nextMax,
         request.params.itemId
       );
       return loadPlanDetail(Number(request.params.id));

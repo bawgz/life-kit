@@ -18,8 +18,12 @@ CREATE TABLE IF NOT EXISTS plan_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   plan_id INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  exercise_type TEXT NOT NULL DEFAULT 'weighted' CHECK (exercise_type IN ('weighted', 'bodyweight', 'timed')),
   order_index INTEGER NOT NULL,
-  notes TEXT
+  notes TEXT,
+  range_min INTEGER, -- progression range: reps, or seconds for timed (null = derive)
+  range_max INTEGER,
+  progress_note TEXT -- why the targets last changed, written by the progression engine
 );
 
 CREATE INDEX IF NOT EXISTS idx_plan_items_plan ON plan_items(plan_id);
@@ -67,6 +71,7 @@ CREATE TABLE IF NOT EXISTS session_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  exercise_type TEXT NOT NULL DEFAULT 'weighted' CHECK (exercise_type IN ('weighted', 'bodyweight', 'timed')),
   order_index INTEGER NOT NULL,
   notes TEXT
 );

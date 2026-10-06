@@ -142,6 +142,53 @@ describe("session items and sets", () => {
     assert.equal(sets.at(-1)!.targetReps, null);
   });
 
+  it("copies each exercise's type from the plan", async () => {
+    const plan = await createPlan({
+      items: [
+        { name: "Bench", orderIndex: 0, sets: [{ setNumber: 1, targetReps: 5 }] },
+        { name: "Dips", exerciseType: "bodyweight", orderIndex: 1, sets: [{ setNumber: 1, targetReps: 8 }] },
+        { name: "Plank", exerciseType: "timed", orderIndex: 2, sets: [{ setNumber: 1, targetDurationSeconds: 45 }] },
+      ],
+    });
+    const s = await startSession({ planId: plan.id });
+    assert.deepEqual(
+      s.items.map((i) => [i.name, i.exerciseType]),
+      [
+        ["Bench", "weighted"],
+        ["Dips", "bodyweight"],
+        ["Plank", "timed"],
+      ]
+    );
+    assert.equal(s.items[2].sets[0].targetDurationSeconds, 45);
+  });
+
+  it("logs a timed set as a duration", async () => {
+    const s = await startSession({});
+    const added = await api<SessionDetail>("POST", `/api/sessions/${s.id}/items`, {
+      name: "Wall sit",
+      exerciseType: "timed",
+      orderIndex: 0,
+    });
+    assert.equal(added.body.items[0].exerciseType, "timed");
+    const item = added.body.items[0];
+    const logged = await api<SessionDetail>("POST", `/api/sessions/${s.id}/items/${item.id}/sets`, {
+      setNumber: 1,
+      durationSeconds: 90,
+    });
+    assert.equal(logged.body.items[0].sets[0].durationSeconds, 90);
+    assert.equal(logged.body.items[0].sets[0].reps, null);
+  });
+
+  it("rejects an unknown exercise type on an ad-hoc item", async () => {
+    const s = await startSession({});
+    const res = await api("POST", `/api/sessions/${s.id}/items`, {
+      name: "x",
+      exerciseType: "cardio",
+      orderIndex: 0,
+    });
+    assert.equal(res.status, 400);
+  });
+
   it("adds, logs against, and deletes an ad-hoc item", async () => {
     const s = await startSession({});
     const added = await api<SessionDetail>("POST", `/api/sessions/${s.id}/items`, {

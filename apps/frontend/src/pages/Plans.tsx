@@ -3,17 +3,12 @@ import { Link, useNavigate } from "react-router-dom";
 import type { CreatePlanItemInput, PlanDetail as PlanDetailType } from "@life-kit/shared";
 import { api, ApiError } from "../api.js";
 import PresetSets from "../components/PresetSets.js";
-
-interface ItemRow {
-  name: string;
-  sets: number;
-  reps: string;
-  weight: string;
-}
-
-function emptyRow(): ItemRow {
-  return { name: "", sets: 3, reps: "", weight: "" };
-}
+import {
+  ExerciseDraftFields,
+  draftToItem,
+  emptyDraft,
+  type ExerciseDraft,
+} from "../components/ExerciseFields.js";
 
 const KIND_LABELS: Record<string, string> = {
   upper: "Upper",
@@ -31,7 +26,7 @@ export default function Plans() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [kind, setKind] = useState("");
-  const [rows, setRows] = useState<ItemRow[]>([emptyRow()]);
+  const [rows, setRows] = useState<ExerciseDraft[]>([emptyDraft()]);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +61,7 @@ export default function Plans() {
     }
   }
 
-  function updateRow(index: number, patch: Partial<ItemRow>) {
+  function updateRow(index: number, patch: Partial<ExerciseDraft>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
@@ -74,17 +69,15 @@ export default function Plans() {
     e.preventDefault();
     if (!name.trim()) return;
 
-    const itemsInput: CreatePlanItemInput[] = rows
-      .filter((r) => r.name.trim() !== "")
-      .map((r, orderIndex) => ({
-        name: r.name.trim(),
-        orderIndex,
-        sets: Array.from({ length: Math.max(1, r.sets) }, (_, i) => ({
-          setNumber: i + 1,
-          targetReps: r.reps ? Number(r.reps) : undefined,
-          targetWeight: r.weight ? Number(r.weight) : undefined,
-        })),
-      }));
+    const itemsInput: CreatePlanItemInput[] = [];
+    for (const row of rows.filter((r) => r.name.trim() !== "")) {
+      const item = draftToItem(row, itemsInput.length);
+      if (typeof item === "string") {
+        setError(item);
+        return;
+      }
+      itemsInput.push(item);
+    }
 
     try {
       const created = await api.createPlan({
@@ -97,7 +90,7 @@ export default function Plans() {
       setName("");
       setDescription("");
       setKind("");
-      setRows([emptyRow()]);
+      setRows([emptyDraft()]);
       setShowNew(false);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Couldn't create template");
@@ -183,45 +176,13 @@ export default function Plans() {
             </div>
 
             {rows.map((row, i) => (
-              <div
-                className="set-row"
-                key={i}
-                style={{ gridTemplateColumns: "1fr 3.2rem 1fr 1fr" }}
-              >
-                <input
-                  placeholder="Exercise (e.g. Bench Press)"
-                  value={row.name}
-                  onChange={(e) => updateRow(i, { name: e.target.value })}
-                />
-                <input
-                  type="number"
-                  min={1}
-                  value={row.sets}
-                  onChange={(e) => updateRow(i, { sets: Number(e.target.value) })}
-                  title="Sets"
-                  className="mono"
-                />
-                <input
-                  placeholder="Reps"
-                  value={row.reps}
-                  onChange={(e) => updateRow(i, { reps: e.target.value })}
-                  className="mono"
-                  inputMode="numeric"
-                />
-                <input
-                  placeholder="Weight"
-                  value={row.weight}
-                  onChange={(e) => updateRow(i, { weight: e.target.value })}
-                  className="mono"
-                  inputMode="decimal"
-                />
-              </div>
+              <ExerciseDraftFields key={i} draft={row} onChange={(patch) => updateRow(i, patch)} />
             ))}
             <div style={{ margin: "0.6rem 0" }}>
               <button
                 type="button"
                 className="link-button"
-                onClick={() => setRows((r) => [...r, emptyRow()])}
+                onClick={() => setRows((r) => [...r, emptyDraft()])}
               >
                 + Add exercise
               </button>

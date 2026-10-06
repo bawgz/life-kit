@@ -66,6 +66,45 @@ describe("plan tools", () => {
     assert.equal(withThree.items[2].sets[0].targetWeight, 25, "goal weight rounds up to 5");
   });
 
+  it("sets and changes an exercise's type", async () => {
+    const plan = await call("create_plan", {
+      name: "Typed",
+      items: [
+        {
+          name: "Plank",
+          exerciseType: "timed",
+          orderIndex: 0,
+          sets: [{ setNumber: 1, targetDurationSeconds: 60 }],
+        },
+      ],
+    });
+    assert.equal(plan.items[0].exerciseType, "timed");
+
+    const added = await call("add_plan_item", {
+      planId: plan.id,
+      name: "Dips",
+      exerciseType: "bodyweight",
+      sets: [{ setNumber: 1, targetReps: 8 }],
+    });
+    assert.equal(added.items[1].exerciseType, "bodyweight");
+
+    const changed = await call("update_plan_item", {
+      planId: plan.id,
+      planItemId: added.items[1].id,
+      exerciseType: "weighted",
+    });
+    assert.equal(changed.items[1].exerciseType, "weighted");
+
+    const session = await call("start_session", { date: "2042-01-01" });
+    const withItem = await call("add_session_item", {
+      sessionId: session.id,
+      name: "Wall sit",
+      exerciseType: "timed",
+      orderIndex: 0,
+    });
+    assert.equal(withItem.items[0].exerciseType, "timed");
+  });
+
   it("updates and removes an exercise", async () => {
     const plan = await newPlan();
     const item = plan.items[0];
@@ -127,6 +166,50 @@ describe("plan tools", () => {
     assert.match(text, /404/);
     await callExpectingError("delete_plan", { planId: 999999 });
     assert.equal((await call("get_plan", { planId: a.id })).items.length, 1);
+  });
+});
+
+describe("progression tools", () => {
+  it("finishing a session moves targets forward, and progress_plan explains why", async () => {
+    const plan = await call("create_plan", {
+      name: "Progressing",
+      items: [
+        {
+          name: "Bench Press",
+          orderIndex: 0,
+          rangeMin: 8,
+          rangeMax: 12,
+          sets: [{ setNumber: 1, targetReps: 12, targetWeight: 100 }],
+        },
+      ],
+    });
+    assert.deepEqual([plan.items[0].rangeMin, plan.items[0].rangeMax], [8, 12]);
+
+    const session = await call("start_session", { planId: plan.id, date: "2043-02-01" });
+    await call("log_set", {
+      sessionId: session.id,
+      sessionItemId: session.items[0].id,
+      setNumber: 1,
+      reps: 12,
+      weight: 100,
+    });
+    await call("update_session", { sessionId: session.id, completedAt: "2043-02-01T18:00:00.000Z" });
+
+    const after = await call("get_plan", { planId: plan.id });
+    assert.equal(after.items[0].sets[0].targetWeight, 105);
+    assert.equal(after.items[0].sets[0].targetReps, 8);
+
+    const result = await call("progress_plan", { planId: plan.id });
+    assert.equal(result.changes[0].changed, false, "already applied");
+    assert.match(result.changes[0].note, /\+5 lb, back to 8 reps/);
+
+    const narrowed = await call("update_plan_item", {
+      planId: plan.id,
+      planItemId: plan.items[0].id,
+      rangeMin: 5,
+      rangeMax: 8,
+    });
+    assert.deepEqual([narrowed.items[0].rangeMin, narrowed.items[0].rangeMax], [5, 8]);
   });
 });
 

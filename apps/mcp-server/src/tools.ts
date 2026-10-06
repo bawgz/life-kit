@@ -15,10 +15,33 @@ const extraMetricsSchema = z
 /** Accepts a number, null, or omitted — callers shouldn't have to know which. */
 const num = z.number().nullish();
 
+const exerciseTypeSchema = z
+  .enum(["weighted", "bodyweight", "timed"])
+  .describe(
+    "How the exercise is measured. 'weighted': weight × reps. 'bodyweight': reps at bodyweight; weight is optional ADDED load (e.g. 25 for BW+25), leave it null for plain bodyweight — never use 0. 'timed': a hold or timed effort; use targetDurationSeconds / durationSeconds instead of reps, weight optional. Defaults to 'weighted'."
+  );
+
 const painFields = {
   painDuring: num.describe("Knee pain 0-10 during the workout (leg days)"),
   painAfter: num.describe("Knee pain 0-10 after the workout (leg days)"),
   painNextMorning: num.describe("Knee pain 0-10 the next morning (leg days)"),
+};
+
+const rangeFields = {
+  rangeMin: z
+    .number()
+    .int()
+    .positive()
+    .nullish()
+    .describe("Bottom of the progression range: reps, or seconds for timed. Null = derive it."),
+  rangeMax: z
+    .number()
+    .int()
+    .positive()
+    .nullish()
+    .describe(
+      "Top of the progression range. Reps climb to this, then weight goes up and reps reset to rangeMin. For timed, the longest hold to progress to (default 60s)."
+    ),
 };
 
 export function registerTools(server: McpServer): void {
@@ -41,7 +64,7 @@ export function registerTools(server: McpServer): void {
     "create_plan",
     {
       description:
-        "Create a reusable workout plan with items and per-set targets. Item names are freeform text (e.g. 'Bench Press', 'Morning Run').",
+        "Create a reusable workout plan with items and per-set targets. Item names are freeform text (e.g. 'Bench Press', 'Morning Run'). Set each item's exerciseType: timed holds use targetDurationSeconds (not reps); bodyweight moves leave targetWeight null.",
       inputSchema: {
         name: z.string(),
         description: z.string().optional(),
@@ -53,6 +76,8 @@ export function registerTools(server: McpServer): void {
           .array(
             z.object({
               name: z.string(),
+              exerciseType: exerciseTypeSchema.optional(),
+              ...rangeFields,
               orderIndex: z.number(),
               notes: z.string().optional(),
               sets: z.array(
@@ -103,6 +128,16 @@ export function registerTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "progress_plan",
+    {
+      description:
+        "Recalculate a plan's targets from logged history (this also happens automatically when a session from the plan is finished). Uses double progression: sets that hit their goal get +1 rep; once every set reaches the top of the range, weight goes up (+5 lb, or +10 lb for lower-body lifts at 100 lb+) and reps reset. Holds on leg days with knee pain over 3/10, deloads 10% after two sessions below the range, and leaves targets alone when logged weights look like different equipment. Returns the updated plan plus a note per exercise explaining what changed. Safe to run repeatedly.",
+      inputSchema: { planId: z.number() },
+    },
+    async ({ planId }) => jsonResult(await api.post(`/api/plans/${planId}/progress`))
+  );
+
+  server.registerTool(
     "add_plan_item",
     {
       description:
@@ -110,6 +145,8 @@ export function registerTools(server: McpServer): void {
       inputSchema: {
         planId: z.number(),
         name: z.string(),
+        exerciseType: exerciseTypeSchema.optional(),
+        ...rangeFields,
         orderIndex: z
           .number()
           .optional()
@@ -141,11 +178,13 @@ export function registerTools(server: McpServer): void {
     "update_plan_item",
     {
       description:
-        "Update an exercise in a workout plan template: rename it, change its notes, or reorder it with orderIndex (0-based; use get_plan to see the current order). To move an exercise, swap orderIndex values with its neighbor.",
+        "Update an exercise in a workout plan template: rename it, change its type, notes, or progression range (rangeMin/rangeMax), or reorder it with orderIndex (0-based; use get_plan to see the current order). To move an exercise, swap orderIndex values with its neighbor. Changing exerciseType doesn't convert existing set targets — update those too (e.g. reps → targetDurationSeconds when switching to timed).",
       inputSchema: {
         planId: z.number(),
         planItemId: z.number(),
         name: z.string().optional(),
+        exerciseType: exerciseTypeSchema.optional(),
+        ...rangeFields,
         orderIndex: z.number().optional(),
         notes: z.string().nullish(),
       },
@@ -324,7 +363,7 @@ export function registerTools(server: McpServer): void {
     "update_session",
     {
       description:
-        "Update a session's notes, knee-pain scores, or completion time. Pain can be recorded during the workout or added later (e.g. next-morning score).",
+        "Update a session's notes, knee-pain scores, or completion time. Pain can be recorded during the workout or added later (e.g. next-morning score). Setting completedAt on an unfinished session finishes it, which recalculates its plan's targets from what was logged (see progress_plan).",
       inputSchema: {
         sessionId: z.number(),
         notes: z.string().nullish(),
@@ -356,6 +395,7 @@ export function registerTools(server: McpServer): void {
       inputSchema: {
         sessionId: z.number(),
         name: z.string(),
+        exerciseType: exerciseTypeSchema.optional(),
         orderIndex: z.number(),
         notes: z.string().optional(),
       },
@@ -367,7 +407,8 @@ export function registerTools(server: McpServer): void {
   server.registerTool(
     "log_set",
     {
-      description: "Log one completed set's actual performance against a session item.",
+      description:
+        "Log one completed set's actual performance against a session item. Timed exercises log durationSeconds instead of reps; bodyweight exercises leave weight null unless load was added.",
       inputSchema: {
         sessionId: z.number(),
         sessionItemId: z.number(),

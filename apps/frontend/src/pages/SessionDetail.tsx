@@ -1,18 +1,40 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
+  ExerciseType,
   SessionDetail as SessionDetailType,
   SessionItemSet as SetType,
 } from "@life-kit/shared";
 import { ApiError, api } from "../api.js";
+import { ExerciseTypeBadge, ExerciseTypeSelect } from "../components/ExerciseFields.js";
+import {
+  amountLabel,
+  durationInputValue,
+  formatActual,
+  formatPrescription,
+  parseDuration,
+  parseNum,
+  weightLabel,
+  weightPlaceholder,
+} from "../format.js";
 
 type SessionItemDetail = SessionDetailType["items"][number];
+
+/** Raw input text for one set row; `time` is used instead of `reps` for timed exercises. */
+interface SetFields {
+  weight: string;
+  reps: string;
+  time: string;
+}
+
+const isLogged = (s: SetType) =>
+  s.weight != null || s.reps != null || s.durationSeconds != null;
 
 /* ---------------- draft persistence (survives tab switches) ---------------- */
 
 interface Draft {
   savedAt: number;
-  sets: Record<number, { weight: string; reps: string }>;
+  sets: Record<number, Partial<SetFields>>;
   notes: string;
   pain: { during: number | null; after: number | null; next: number | null };
 }
@@ -60,7 +82,7 @@ function clearDraft(id: number) {
 /* ---------------- form state ---------------- */
 
 interface LogForm {
-  sets: Record<number, { weight: string; reps: string }>;
+  sets: Record<number, SetFields>;
   notes: string;
   painDuring: number | null;
   painAfter: number | null;
@@ -69,13 +91,14 @@ interface LogForm {
 
 function initialForm(s: SessionDetailType): LogForm {
   const draft = loadDraft(s.id);
-  const sets: Record<number, { weight: string; reps: string }> = {};
+  const sets: Record<number, SetFields> = {};
   for (const item of s.items) {
     for (const set of item.sets) {
       const d = draft?.sets[set.id];
       sets[set.id] = {
         weight: d?.weight ?? prefilled(set, "weight"),
         reps: d?.reps ?? prefilled(set, "reps"),
+        time: d?.time ?? prefilled(set, "time"),
       };
     }
   }
@@ -90,25 +113,31 @@ function initialForm(s: SessionDetailType): LogForm {
 
 /**
  * Like the workout form: set rows start pre-filled with their goal
- * weight/reps so Luke only edits where actuals differ. Server actuals win
- * over targets; an empty string means no goal either.
+ * weight/reps/time so Luke only edits where actuals differ. Server actuals
+ * win over targets; an empty string means no goal either.
  */
-function prefilled(set: SetType, field: "weight" | "reps"): string {
+function prefilled(set: SetType, field: keyof SetFields): string {
+  if (field === "time") return durationInputValue(set.durationSeconds ?? set.targetDurationSeconds);
   const actual = field === "weight" ? set.weight : set.reps;
   if (actual != null) return String(actual);
   const target = field === "weight" ? set.targetWeight : set.targetReps;
   return target != null ? String(target) : "";
 }
 
+function prefilledFields(set: SetType): SetFields {
+  return {
+    weight: prefilled(set, "weight"),
+    reps: prefilled(set, "reps"),
+    time: prefilled(set, "time"),
+  };
+}
+
 /** Merge a fresh server session into the form, keeping unsaved edits. */
 function mergeForm(s: SessionDetailType, prev: LogForm): LogForm {
-  const sets: Record<number, { weight: string; reps: string }> = {};
+  const sets: Record<number, SetFields> = {};
   for (const item of s.items) {
     for (const set of item.sets) {
-      sets[set.id] = prev.sets[set.id] ?? {
-        weight: prefilled(set, "weight"),
-        reps: prefilled(set, "reps"),
-      };
+      sets[set.id] = prev.sets[set.id] ?? prefilledFields(set);
     }
   }
   return { ...prev, sets };
@@ -122,23 +151,12 @@ function prettyDate(iso: string): string {
   });
 }
 
-function parseNum(raw: string): number | null | "invalid" {
-  const t = raw.trim();
-  if (t === "") return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : "invalid";
-}
-
 function workoutText(s: SessionDetailType): string {
   const lines = [`${s.planName ?? "Workout"} — ${s.date}`];
   for (const item of s.items) {
-    const done = item.sets.filter((x) => x.weight != null || x.reps != null);
+    const done = item.sets.filter(isLogged);
     if (done.length > 0) {
-      lines.push(
-        `${item.name}: ${done
-          .map((x) => `${x.weight ?? "–"}×${x.reps ?? "–"}`)
-          .join(", ")}`
-      );
+      lines.push(`${item.name}: ${done.map((x) => formatActual(x, item.exerciseType)).join(", ")}`);
     }
   }
   const pains = [s.painDuring, s.painAfter, s.painNextMorning];
@@ -147,6 +165,13 @@ function workoutText(s: SessionDetailType): string {
   }
   if (s.notes) lines.push(`Notes: ${s.notes}`);
   return lines.join("\n");
+}
+
+/** True if the exercise came from a plan with any goal set. */
+function hasTargets(item: SessionItemDetail): boolean {
+  return item.sets.some(
+    (s) => s.targetWeight != null || s.targetReps != null || s.targetDurationSeconds != null
+  );
 }
 
 /* ---------------- small components ---------------- */
@@ -206,6 +231,7 @@ export default function SessionDetail() {
   const [error, setError] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [newItemName, setNewItemName] = useState("");
+  const [newItemType, setNewItemType] = useState<ExerciseType>("weighted");
   const [confirmRemoveSet, setConfirmRemoveSet] = useState<number | null>(null);
   const [confirmRemoveItem, setConfirmRemoveItem] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -252,7 +278,7 @@ export default function SessionDetail() {
     }
   }
 
-  function setSetField(setId: number, field: "weight" | "reps", value: string) {
+  function setSetField(setId: number, field: keyof SetFields, value: string) {
     setForm((prev) =>
       prev
         ? { ...prev, sets: { ...prev.sets, [setId]: { ...prev.sets[setId], [field]: value } } }
@@ -260,32 +286,30 @@ export default function SessionDetail() {
     );
   }
 
-  async function saveSet(itemId: number, set: SetType) {
+  async function saveSet(item: SessionItemDetail, set: SetType) {
     if (!form) return;
-    const cur = form.sets[set.id] ?? { weight: "", reps: "" };
+    const timed = item.exerciseType === "timed";
+    const cur = form.sets[set.id] ?? prefilledFields(set);
     const w = parseNum(cur.weight);
-    const r = parseNum(cur.reps);
-    if (w === "invalid" || r === "invalid") {
-      // Revert the bad field to the server value (or the goal it was prefilled with).
+    const amount = timed ? parseDuration(cur.time) : parseNum(cur.reps);
+    if (w === "invalid" || amount === "invalid") {
+      // Revert to the server value (or the goal it was prefilled with).
       setForm((prev) =>
-        prev
-          ? {
-              ...prev,
-              sets: {
-                ...prev.sets,
-                [set.id]: {
-                  weight: prefilled(set, "weight"),
-                  reps: prefilled(set, "reps"),
-                },
-              },
-            }
-          : prev
+        prev ? { ...prev, sets: { ...prev.sets, [set.id]: prefilledFields(set) } } : prev
       );
-      setError("Numbers only in weight / reps.");
+      setError(
+        amount === "invalid" && timed
+          ? "Time must be seconds (45) or minutes:seconds (1:30)."
+          : "Numbers only in weight / reps."
+      );
       return;
     }
-    if (w === set.weight && r === set.reps) return; // nothing changed
-    await mutate(() => api.updateSet(sessionId, itemId, set.id, { weight: w, reps: r }));
+    const patch = timed ? { weight: w, durationSeconds: amount } : { weight: w, reps: amount };
+    const unchanged = timed
+      ? w === set.weight && amount === set.durationSeconds
+      : w === set.weight && amount === set.reps;
+    if (unchanged) return;
+    await mutate(() => api.updateSet(sessionId, item.id, set.id, patch));
   }
 
   async function addSet(item: SessionItemDetail) {
@@ -294,7 +318,7 @@ export default function SessionDetail() {
   }
 
   async function removeSet(itemId: number, set: SetType) {
-    const logged = set.weight != null || set.reps != null;
+    const logged = isLogged(set);
     if (logged && confirmRemoveSet !== set.id) {
       setConfirmRemoveSet(set.id);
       return;
@@ -319,12 +343,16 @@ export default function SessionDetail() {
     const name = newItemName.trim();
     setNewItemName("");
     await mutate(() =>
-      api.addSessionItem(sessionId, { name, orderIndex: session.items.length })
+      api.addSessionItem(sessionId, {
+        name,
+        exerciseType: newItemType,
+        orderIndex: session.items.length,
+      })
     );
   }
 
   async function removeItem(item: SessionItemDetail) {
-    const logged = item.sets.some((s) => s.weight != null || s.reps != null);
+    const logged = item.sets.some(isLogged);
     if (logged && confirmRemoveItem !== item.id) {
       setConfirmRemoveItem(item.id);
       return;
@@ -457,7 +485,9 @@ export default function SessionDetail() {
       {session.items.map((item) => (
         <div className="card exercise-block" key={item.id}>
           <div className="exercise-head">
-            <h2 className="exercise-name">{item.name}</h2>
+            <h2 className="exercise-name">
+              {item.name} <ExerciseTypeBadge type={item.exerciseType} />
+            </h2>
             <button
               type="button"
               className={`link-button${confirmRemoveItem === item.id ? " danger" : ""}`}
@@ -466,11 +496,24 @@ export default function SessionDetail() {
               {confirmRemoveItem === item.id ? "Confirm remove" : "Remove"}
             </button>
           </div>
+          {hasTargets(item) && (
+            <p className="exercise-goal">
+              Goal <span className="mono">{formatPrescription(item.sets, item.exerciseType)}</span>
+            </p>
+          )}
           {item.notes && <p className="exercise-note">{item.notes}</p>}
 
+          <div className="set-row set-header" aria-hidden>
+            <span>Set</span>
+            <span>{weightLabel(item.exerciseType)}</span>
+            <span>{amountLabel(item.exerciseType)}</span>
+            <span />
+            <span />
+          </div>
           {item.sets.map((set) => {
-            const f = form.sets[set.id] ?? { weight: "", reps: "" };
-            const done = set.weight != null || set.reps != null;
+            const f = form.sets[set.id] ?? prefilledFields(set);
+            const done = isLogged(set);
+            const timed = item.exerciseType === "timed";
             const confirming = confirmRemoveSet === set.id;
             return (
               <div className="set-row" key={set.id}>
@@ -478,23 +521,32 @@ export default function SessionDetail() {
                 <input
                   className="mono"
                   inputMode="decimal"
-                  placeholder={set.targetWeight != null ? String(set.targetWeight) : "lbs"}
-                  title={set.targetWeight != null ? `Target: ${set.targetWeight}` : "Weight"}
-                  aria-label={`${item.name} set ${set.setNumber} weight`}
+                  placeholder={weightPlaceholder(item.exerciseType)}
+                  aria-label={`${item.name} set ${set.setNumber} ${weightLabel(item.exerciseType)}`}
                   value={f.weight}
                   onChange={(e) => setSetField(set.id, "weight", e.target.value)}
-                  onBlur={() => saveSet(item.id, set)}
+                  onBlur={() => saveSet(item, set)}
                 />
-                <input
-                  className="mono"
-                  inputMode="decimal"
-                  placeholder={set.targetReps != null ? `×${set.targetReps}` : "reps"}
-                  title={set.targetReps != null ? `Target: ${set.targetReps} reps` : "Reps"}
-                  aria-label={`${item.name} set ${set.setNumber} reps`}
-                  value={f.reps}
-                  onChange={(e) => setSetField(set.id, "reps", e.target.value)}
-                  onBlur={() => saveSet(item.id, set)}
-                />
+                {timed ? (
+                  <input
+                    className="mono"
+                    placeholder="0:45"
+                    aria-label={`${item.name} set ${set.setNumber} time`}
+                    value={f.time}
+                    onChange={(e) => setSetField(set.id, "time", e.target.value)}
+                    onBlur={() => saveSet(item, set)}
+                  />
+                ) : (
+                  <input
+                    className="mono"
+                    inputMode="decimal"
+                    placeholder="reps"
+                    aria-label={`${item.name} set ${set.setNumber} reps`}
+                    value={f.reps}
+                    onChange={(e) => setSetField(set.id, "reps", e.target.value)}
+                    onBlur={() => saveSet(item, set)}
+                  />
+                )}
                 {done ? <span className="set-done">✓</span> : <span className="set-pending">—</span>}
                 <button
                   type="button"
@@ -526,6 +578,7 @@ export default function SessionDetail() {
             onChange={(e) => setNewItemName(e.target.value)}
             style={{ flex: 1, minWidth: "10rem" }}
           />
+          <ExerciseTypeSelect label="Exercise type" value={newItemType} onChange={setNewItemType} />
           <button type="submit" className="btn btn-small">
             Add
           </button>

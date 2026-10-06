@@ -7,13 +7,20 @@ import type {
 } from "@life-kit/shared";
 import { api, ApiError } from "../api.js";
 import PresetSets from "../components/PresetSets.js";
-
-function parseNum(raw: string): number | null | "invalid" {
-  const t = raw.trim();
-  if (t === "") return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : "invalid";
-}
+import {
+  ExerciseDraftFields,
+  ExerciseTypeSelect,
+  draftToItem,
+  emptyDraft,
+} from "../components/ExerciseFields.js";
+import {
+  amountLabel,
+  durationInputValue,
+  parseDuration,
+  parseNum,
+  weightLabel,
+  weightPlaceholder,
+} from "../format.js";
 
 function errMsg(e: unknown): string {
   return e instanceof ApiError ? e.message : "Something went wrong";
@@ -38,14 +45,22 @@ function EditSetRow({
 }) {
   const [confirming, setConfirming] = useState(false);
 
-  async function save(field: "targetWeight" | "targetReps", raw: string) {
-    const v = parseNum(raw);
+  const timed = item.exerciseType === "timed";
+
+  async function save(
+    field: "targetWeight" | "targetReps" | "targetDurationSeconds",
+    raw: string
+  ) {
+    const v = field === "targetDurationSeconds" ? parseDuration(raw) : parseNum(raw);
     if (v === "invalid") {
-      onError("Numbers only in weight / reps.");
+      onError(
+        field === "targetDurationSeconds"
+          ? "Time must be seconds (45) or minutes:seconds (1:30)."
+          : "Numbers only in weight / reps."
+      );
       return;
     }
-    const current = field === "targetWeight" ? set.targetWeight : set.targetReps;
-    if (v === current) return;
+    if (v === set[field]) return;
     try {
       const updated = await api.updatePlanItemSet(planId, item.id, set.id, { [field]: v });
       onChanged(updated);
@@ -74,19 +89,29 @@ function EditSetRow({
       <input
         className="mono"
         inputMode="decimal"
-        placeholder="lbs"
+        placeholder={weightPlaceholder(item.exerciseType)}
         aria-label={`${item.name} set ${set.setNumber} goal weight`}
         defaultValue={set.targetWeight != null ? String(set.targetWeight) : ""}
         onBlur={(e) => save("targetWeight", e.target.value)}
       />
-      <input
-        className="mono"
-        inputMode="numeric"
-        placeholder="reps"
-        aria-label={`${item.name} set ${set.setNumber} goal reps`}
-        defaultValue={set.targetReps != null ? String(set.targetReps) : ""}
-        onBlur={(e) => save("targetReps", e.target.value)}
-      />
+      {timed ? (
+        <input
+          className="mono"
+          placeholder="0:45"
+          aria-label={`${item.name} set ${set.setNumber} goal time`}
+          defaultValue={durationInputValue(set.targetDurationSeconds)}
+          onBlur={(e) => save("targetDurationSeconds", e.target.value)}
+        />
+      ) : (
+        <input
+          className="mono"
+          inputMode="numeric"
+          placeholder="reps"
+          aria-label={`${item.name} set ${set.setNumber} goal reps`}
+          defaultValue={set.targetReps != null ? String(set.targetReps) : ""}
+          onBlur={(e) => save("targetReps", e.target.value)}
+        />
+      )}
       <span />
       <button
         type="button"
@@ -97,6 +122,77 @@ function EditSetRow({
       >
         {confirming ? "Sure?" : "×"}
       </button>
+    </div>
+  );
+}
+
+/**
+ * The progression range: reps climb to the top, then weight goes up and reps
+ * reset to the bottom. Blank means "work it out" (from an "8-12 reps" note,
+ * else the target ± 2; timed holds cap at 60s).
+ */
+function RangeField({
+  item,
+  tick,
+  onSave,
+  onError,
+}: {
+  item: PlanItemType;
+  tick: number;
+  onSave: (patch: { rangeMin: number | null; rangeMax: number | null }) => void;
+  onError: (m: string) => void;
+}) {
+  const timed = item.exerciseType === "timed";
+  function save(form: HTMLElement) {
+    const [minEl, maxEl] = form.querySelectorAll("input");
+    const min = parseNum(minEl.value);
+    const max = parseNum(maxEl.value);
+    if (min === "invalid" || max === "invalid") {
+      onError("Range must be whole numbers.");
+      return;
+    }
+    if (min === item.rangeMin && max === item.rangeMax) return;
+    onSave({ rangeMin: min, rangeMax: max });
+  }
+  return (
+    <div
+      className="field"
+      onBlur={(e) => {
+        // Save once focus leaves both inputs, not between them.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) save(e.currentTarget);
+      }}
+    >
+      <span>{timed ? "Progress holds (seconds)" : "Rep range"}</span>
+      <div className="range-inputs" key={`range-${item.id}-${tick}`}>
+        <input
+          className="mono"
+          inputMode="numeric"
+          aria-label={`${item.name} range low`}
+          placeholder="auto"
+          defaultValue={item.rangeMin ?? ""}
+        />
+        <span>to</span>
+        <input
+          className="mono"
+          inputMode="numeric"
+          aria-label={`${item.name} range high`}
+          placeholder={timed ? "60" : "auto"}
+          defaultValue={item.rangeMax ?? ""}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Column labels over a list of set rows. */
+function SetHeader({ type }: { type: PlanItemType["exerciseType"] }) {
+  return (
+    <div className="set-row set-header" aria-hidden>
+      <span>Set</span>
+      <span>Goal {weightLabel(type)}</span>
+      <span>Goal {amountLabel(type).toLowerCase()}</span>
+      <span />
+      <span />
     </div>
   );
 }
@@ -124,7 +220,13 @@ function EditItem({
 }) {
   const [confirming, setConfirming] = useState(false);
 
-  async function saveItem(patch: { name?: string; notes?: string | null }) {
+  async function saveItem(patch: {
+    name?: string;
+    notes?: string | null;
+    exerciseType?: PlanItemType["exerciseType"];
+    rangeMin?: number | null;
+    rangeMax?: number | null;
+  }) {
     try {
       const updated = await api.updatePlanItem(planId, item.id, patch);
       onChanged(updated);
@@ -141,6 +243,7 @@ function EditItem({
         setNumber: next,
         targetReps: last?.targetReps ?? null,
         targetWeight: last?.targetWeight ?? null,
+        targetDurationSeconds: last?.targetDurationSeconds ?? null,
       });
       onChanged(updated);
     } catch (e) {
@@ -176,6 +279,15 @@ function EditItem({
         />
       </div>
       <div className="field">
+        <span>Type</span>
+        <ExerciseTypeSelect
+          label={`${item.name} type`}
+          value={item.exerciseType}
+          onChange={(exerciseType) => saveItem({ exerciseType })}
+        />
+      </div>
+      <RangeField item={item} tick={tick} onSave={saveItem} onError={onError} />
+      <div className="field">
         <span>Notes</span>
         <input
           key={`notes-${item.id}-${tick}`}
@@ -188,6 +300,7 @@ function EditItem({
         />
       </div>
 
+      <SetHeader type={item.exerciseType} />
       {item.sets.map((s) => (
         <EditSetRow
           key={s.id}
@@ -251,10 +364,9 @@ export default function PlanDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tick, setTick] = useState(0);
 
-  const [newName, setNewName] = useState("");
-  const [newSets, setNewSets] = useState(3);
-  const [newReps, setNewReps] = useState("");
-  const [newWeight, setNewWeight] = useState("");
+  const [draft, setDraft] = useState(emptyDraft);
+  const [progressing, setProgressing] = useState(false);
+  const [progressSummary, setProgressSummary] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -266,6 +378,27 @@ export default function PlanDetail() {
   function refresh(p: PlanDetailType) {
     setPlan(p);
     setTick((t) => t + 1);
+  }
+
+  async function updateFromHistory() {
+    setProgressing(true);
+    setError(null);
+    try {
+      const { plan: updated, changes } = await api.progressPlan(planId);
+      refresh(updated);
+      const changed = changes.filter((c) => c.changed).length;
+      setProgressSummary(
+        changes.length === 0
+          ? "No logged workouts for this template yet."
+          : changed === 0
+            ? "Targets already match your latest workouts."
+            : `Updated ${changed} of ${changes.length} exercises from your logged workouts.`
+      );
+    } catch (e) {
+      setError(errMsg(e));
+    } finally {
+      setProgressing(false);
+    }
   }
 
   async function startSession() {
@@ -284,28 +417,16 @@ export default function PlanDetail() {
 
   async function addExercise(e: FormEvent) {
     e.preventDefault();
-    if (!newName.trim()) return;
-    const reps = parseNum(newReps);
-    const weight = parseNum(newWeight);
-    if (reps === "invalid" || weight === "invalid") {
-      setError("Numbers only in reps / weight.");
+    if (!draft.name.trim()) return;
+    const item = draftToItem(draft, plan?.items.length ?? 0);
+    if (typeof item === "string") {
+      setError(item);
       return;
     }
     try {
-      const updated = await api.addPlanItem(planId, {
-        name: newName.trim(),
-        orderIndex: plan?.items.length ?? 0,
-        sets: Array.from({ length: Math.max(1, newSets) }, (_, i) => ({
-          setNumber: i + 1,
-          targetReps: reps,
-          targetWeight: weight,
-        })),
-      });
+      const updated = await api.addPlanItem(planId, item);
       refresh(updated);
-      setNewName("");
-      setNewReps("");
-      setNewWeight("");
-      setNewSets(3);
+      setDraft(emptyDraft());
     } catch (err) {
       setError(errMsg(err));
     }
@@ -379,6 +500,20 @@ export default function PlanDetail() {
             {editing ? "Done editing" : "Edit template"}
           </button>
         </div>
+        {!editing && (
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Targets move up automatically when you finish a workout.{" "}
+            <button
+              type="button"
+              className="link-button"
+              onClick={updateFromHistory}
+              disabled={progressing}
+            >
+              {progressing ? "Updating…" : "Update from history now"}
+            </button>
+            {progressSummary && <span className="save-state ok"> · {progressSummary}</span>}
+          </p>
+        )}
       </div>
 
       <p className="section-label">Preset — {plan.items.length} exercises</p>
@@ -405,38 +540,10 @@ export default function PlanDetail() {
 
           <form className="card" onSubmit={addExercise}>
             <p className="section-label">Add exercise</p>
-            <div
-              className="set-row"
-              style={{ gridTemplateColumns: "1fr 3.2rem 1fr 1fr" }}
-            >
-              <input
-                placeholder="Exercise (e.g. Bench Press)"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-              />
-              <input
-                type="number"
-                min={1}
-                value={newSets}
-                onChange={(e) => setNewSets(Number(e.target.value))}
-                title="Sets"
-                className="mono"
-              />
-              <input
-                placeholder="Reps"
-                value={newReps}
-                onChange={(e) => setNewReps(e.target.value)}
-                className="mono"
-                inputMode="numeric"
-              />
-              <input
-                placeholder="Weight"
-                value={newWeight}
-                onChange={(e) => setNewWeight(e.target.value)}
-                className="mono"
-                inputMode="decimal"
-              />
-            </div>
+            <ExerciseDraftFields
+              draft={draft}
+              onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+            />
             <div style={{ marginTop: "0.6rem" }}>
               <button type="submit" className="btn btn-small">
                 Add

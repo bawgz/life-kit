@@ -8,6 +8,7 @@ import type {
   CreateSessionRequest,
   Plan,
   PlanDetail,
+  ProgressResult,
   ScheduledWorkout,
   Session,
   SessionDetail,
@@ -55,6 +56,7 @@ export const api = {
   updatePlan: (id: number, body: UpdatePlanRequest) =>
     request<PlanDetail>("PATCH", `/plans/${id}`, body),
   deletePlan: (id: number) => request<void>("DELETE", `/plans/${id}`),
+  progressPlan: (id: number) => request<ProgressResult>("POST", `/plans/${id}/progress`),
   addPlanItem: (planId: number, body: CreatePlanItemInput) =>
     request<PlanDetail>("POST", `/plans/${planId}/items`, body),
   updatePlanItem: (planId: number, itemId: number, body: UpdatePlanItemInput) =>

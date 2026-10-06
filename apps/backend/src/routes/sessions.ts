@@ -3,6 +3,7 @@ import type {
   CreateSessionItemRequest,
   CreateSessionItemSetRequest,
   CreateSessionRequest,
+  ExerciseType,
   Session,
   SessionDetail,
   SessionItem,
@@ -11,6 +12,8 @@ import type {
   UpdateSessionItemSetRequest,
 } from "@life-kit/shared";
 import { db, parseJson, toJson } from "../db/index.js";
+import { exerciseTypeError, isValidExerciseType } from "../exerciseType.js";
+import { applyProgression } from "../progress.js";
 import { requireAuth } from "../middleware/auth.js";
 
 interface SessionRow {
@@ -32,6 +35,7 @@ interface SessionItemRow {
   id: number;
   session_id: number;
   name: string;
+  exercise_type: ExerciseType;
   order_index: number;
   notes: string | null;
 }
@@ -54,6 +58,7 @@ interface PlanItemRow {
   id: number;
   plan_id: number;
   name: string;
+  exercise_type: ExerciseType;
   order_index: number;
   notes: string | null;
 }
@@ -86,6 +91,7 @@ const rowToSessionItem = (row: SessionItemRow): SessionItem => ({
   id: row.id,
   sessionId: row.session_id,
   name: row.name,
+  exerciseType: row.exercise_type,
   orderIndex: row.order_index,
   notes: row.notes,
 });
@@ -218,8 +224,8 @@ export function registerSessionRoutes(root: FastifyInstance): void {
             "SELECT * FROM plan_item_sets WHERE plan_item_id = ? ORDER BY set_number"
           );
           const insertItem = db.prepare(
-            `INSERT INTO session_items (session_id, name, order_index, notes)
-             VALUES (?, ?, ?, ?)`
+            `INSERT INTO session_items (session_id, name, exercise_type, order_index, notes)
+             VALUES (?, ?, ?, ?, ?)`
           );
           const insertSet = db.prepare(
             `INSERT INTO session_item_sets
@@ -231,6 +237,7 @@ export function registerSessionRoutes(root: FastifyInstance): void {
             const itemResult = insertItem.run(
               id,
               planItem.name,
+              planItem.exercise_type,
               planItem.order_index,
               planItem.notes
             );
@@ -288,7 +295,20 @@ export function registerSessionRoutes(root: FastifyInstance): void {
         painNextMorning !== undefined ? painNextMorning : existing.pain_next_morning,
         id
       );
-      return loadSessionDetail(id);
+
+      // Finishing a workout moves its plan's targets forward from what was logged.
+      const updated = loadSessionDetail(id)!;
+      if (!existing.completed_at && updated.completedAt) {
+        const planId =
+          updated.planId ??
+          db
+            .prepare<[number], { plan_id: number | null }>(
+              "SELECT plan_id FROM scheduled_workouts WHERE id = ?"
+            )
+            .get(updated.scheduledWorkoutId ?? -1)?.plan_id;
+        if (planId) applyProgression(planId);
+      }
+      return updated;
     }
   );
 
@@ -301,11 +321,14 @@ export function registerSessionRoutes(root: FastifyInstance): void {
         .get(sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
 
-      const { name, orderIndex, notes } = request.body;
+      const { name, exerciseType, orderIndex, notes } = request.body;
+      if (!isValidExerciseType(exerciseType)) {
+        return reply.code(400).send(exerciseTypeError);
+      }
       db.prepare(
-        `INSERT INTO session_items (session_id, name, order_index, notes)
-         VALUES (?, ?, ?, ?)`
-      ).run(sessionId, name, orderIndex, notes ?? null);
+        `INSERT INTO session_items (session_id, name, exercise_type, order_index, notes)
+         VALUES (?, ?, ?, ?, ?)`
+      ).run(sessionId, name, exerciseType ?? "weighted", orderIndex, notes ?? null);
       return reply.code(201).send(loadSessionDetail(sessionId));
     }
   );

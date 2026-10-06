@@ -7,6 +7,14 @@ export type ISODate = string; // e.g. "2026-09-22"
 
 export type ScheduledWorkoutStatus = "planned" | "completed" | "skipped";
 
+/**
+ * How an exercise is measured:
+ * - "weighted": weight × reps.
+ * - "bodyweight": reps at bodyweight; weight, if set, is added load (BW + 25).
+ * - "timed": held or performed for a duration (durationSeconds); weight optional.
+ */
+export type ExerciseType = "weighted" | "bodyweight" | "timed";
+
 /** Arbitrary metric values that don't have a dedicated column (RPE, incline, tempo, etc.). */
 export type ExtraMetrics = Record<string, string | number | boolean>;
 
@@ -23,8 +31,18 @@ export interface PlanItem {
   id: Id;
   planId: Id;
   name: string;
+  exerciseType: ExerciseType;
   orderIndex: number;
   notes: string | null;
+  /**
+   * Progression range — reps, or seconds for timed exercises. Targets climb
+   * to rangeMax, then weight goes up and reps reset to rangeMin. Null means
+   * derived (from an "8-12 reps" note, else target ± 2; timed caps at 60s).
+   */
+  rangeMin: number | null;
+  rangeMax: number | null;
+  /** Why the targets last changed, e.g. "Oct 5: hit 12 reps on every set → +10 lb". */
+  progressNote: string | null;
 }
 
 export interface PlanItemSet {
@@ -74,6 +92,7 @@ export interface SessionItem {
   id: Id;
   sessionId: Id;
   name: string;
+  exerciseType: ExerciseType;
   orderIndex: number;
   notes: string | null;
 }
@@ -113,15 +132,34 @@ export interface CreatePlanItemSetInput {
 
 export interface CreatePlanItemInput {
   name: string;
+  exerciseType?: ExerciseType; // defaults to "weighted"
   orderIndex: number;
   notes?: string | null;
+  rangeMin?: number | null;
+  rangeMax?: number | null;
   sets: CreatePlanItemSetInput[];
 }
 
 export interface UpdatePlanItemInput {
   name?: string;
+  exerciseType?: ExerciseType;
+  rangeMin?: number | null;
+  rangeMax?: number | null;
   orderIndex?: number;
   notes?: string | null;
+}
+
+/** One exercise's outcome from POST /plans/:id/progress (or finishing a session). */
+export interface ProgressChange {
+  planItemId: Id;
+  name: string;
+  note: string;
+  changed: boolean;
+}
+
+export interface ProgressResult {
+  plan: PlanDetail;
+  changes: ProgressChange[];
 }
 
 export type UpdatePlanItemSetInput = Partial<CreatePlanItemSetInput>;
@@ -169,6 +207,7 @@ export interface UpdateSessionRequest {
 
 export interface CreateSessionItemRequest {
   name: string;
+  exerciseType?: ExerciseType; // defaults to "weighted"
   orderIndex: number;
   notes?: string | null;
 }
