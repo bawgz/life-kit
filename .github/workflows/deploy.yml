@@ -3,6 +3,16 @@ name: Deploy to production
 # Manual deploys only: repo Actions tab → "Deploy to production" → Run workflow.
 # Pushing to main does NOT trigger a deploy. To make deploys automatic,
 # uncomment the push trigger below.
+#
+# Auth is via Workload Identity Federation (no long-lived GCP keys).
+# One-time setup: create the pool/provider/service account (see README or
+# the setup script), then set these repo Variables:
+#   WIF_PROVIDER        e.g. projects/123/locations/global/workloadIdentityPools/gh-actions-pool/providers/gh-provider
+#   GCP_SERVICE_ACCOUNT e.g. github-deploy@life-kit-509418.iam.gserviceaccount.com
+#   DEPLOY_PATH         absolute path of the repo checkout on the VM
+# and one Secret:
+#   GCP_SSH_PRIVATE_KEY the private half of a keypair whose public half is in
+#                       the deploy user's ~/.ssh/authorized_keys on the VM
 on:
   workflow_dispatch:
   # push:
@@ -11,19 +21,27 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1
+      - id: gcp-auth
+        uses: google-github-actions/auth@v3
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: 22
-          script: |
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - id: deploy
+        uses: google-github-actions/ssh-compute@v2
+        with:
+          instance_name: life-kit
+          zone: us-central1-a
+          project_id: life-kit-509418
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |-
             set -e
-            cd ${{ secrets.DEPLOY_PATH }}
+            cd ${{ vars.DEPLOY_PATH }}
             git fetch origin main
             git reset --hard origin/main
-            docker compose build
-            docker compose up -d
+            docker compose up -d --build
             docker compose ps
