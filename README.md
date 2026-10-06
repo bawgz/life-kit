@@ -55,26 +55,48 @@ npm run build        # build every workspace
 ## Running on the GCP instance (production)
 
 The app runs there via Docker Compose: `caddy` (reverse proxy + auto-HTTPS +
-serves the built frontend), `backend`, and `mcp-server`.
+serves the built frontend), `backend`, and `mcp-server`. It runs as the
+dedicated `deploy` user from `/home/deploy/life-kit` — automation never runs
+as a human user.
+
+**Deploy (primary path):** repo Actions tab → "Deploy to production" →
+Run workflow. It pulls `main`, rebuilds the images, and restarts the stack.
+Pushing to `main` never deploys on its own.
 
 **SSH in** (tunnels through IAP — SSH is not open to the public internet):
 ```
 gcloud compute ssh life-kit --zone=us-central1-a --tunnel-through-iap
 ```
 
-**Start/restart everything** (also picks up any code changes after a `git pull`):
+**Manual deploy / maintenance** (as the `deploy` user):
 ```
+sudo -iu deploy
 cd ~/life-kit
-git pull
+git fetch origin main
+git reset --hard origin/main
 docker compose up -d --build
 ```
 
 **Check status / logs:**
 ```
+sudo -iu deploy
+cd ~/life-kit
 docker compose ps
 docker compose logs -f caddy      # watch for successful cert issuance
 docker compose logs -f backend
 docker compose logs -f mcp-server
+```
+
+**Verifying a checkout without touching production:** build under a throwaway
+project name so container and volume names can't collide with the live stack
+(the staging backend gets a fresh empty database; production data is untouched):
+```
+sudo -iu deploy
+cd ~/life-kit
+docker compose -p life-kit-staging build
+docker compose -p life-kit-staging up -d backend mcp-server
+docker compose -p life-kit-staging logs backend --tail 20
+docker compose -p life-kit-staging down -v   # removes staging volumes only
 ```
 
 **Stop everything:**
