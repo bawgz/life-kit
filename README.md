@@ -55,7 +55,9 @@ npm run build        # build every workspace
 ## Running on the GCP instance (production)
 
 The app runs there via Docker Compose: `caddy` (reverse proxy + auto-HTTPS +
-serves the built frontend), `backend`, and `mcp-server`.
+serves the built frontend), `backend`, and `mcp-server`. It runs as the
+dedicated `deploy` user from `/home/deploy/life-kit` — automation never runs
+as a human user.
 
 **Deploy (primary path):** repo Actions tab → "Deploy to production" →
 Run workflow. It pulls `main`, rebuilds the images, and restarts the stack.
@@ -66,8 +68,9 @@ Pushing to `main` never deploys on its own.
 gcloud compute ssh life-kit --zone=us-central1-a --tunnel-through-iap
 ```
 
-**Manual deploy** (also picks up any code changes):
+**Manual deploy / maintenance** (as the `deploy` user):
 ```
+sudo -iu deploy
 cd ~/life-kit
 git fetch origin main
 git reset --hard origin/main
@@ -76,6 +79,7 @@ docker compose up -d --build
 
 **Check status / logs:**
 ```
+sudo -iu deploy
 cd ~/life-kit
 docker compose ps
 docker compose logs -f caddy      # watch for successful cert issuance
