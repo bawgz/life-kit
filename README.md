@@ -53,6 +53,38 @@ npm run build        # build every workspace
 npm test             # backend API + MCP end-to-end tests (temp DBs, no .env needed)
 ```
 
+### Tests
+
+Two suites, both using Node's built-in test runner (`node:test`) via `tsx`:
+
+- `apps/backend/test/` — the REST API, driven in-process with Fastify's
+  `inject()`. Each test file gets its own fresh temp SQLite database.
+- `apps/mcp-server/test/` — end-to-end: starts a real backend and the real MCP
+  HTTP server on free ports, then calls every tool through an MCP client, just
+  like an agent does. `coverage.test.ts` fails if a backend route has no MCP
+  tool (or vice versa) — when you add either, update its `TOOL_ROUTES` map.
+
+Neither needs a `.env` or a running server, and neither touches your real
+database. From the repo root:
+
+```
+npm run build -w packages/shared   # first time, or after changing shared types
+npm test                           # both suites
+npm test -w apps/backend           # just the backend suite
+npm test -w apps/mcp-server        # just the MCP suite
+```
+
+To run one file or filter by test name, from inside the app's directory:
+
+```
+cd apps/backend
+node --import tsx --test test/plans.test.ts
+node --import tsx --test --test-name-pattern="placeholder" "test/**/*.test.ts"
+```
+
+CI runs `npm run typecheck` and `npm test` before every deploy; a failure
+blocks the deploy (see `.github/workflows/deploy.yml`).
+
 ## Running on the GCP instance (production)
 
 The app runs there via Docker Compose: `caddy` (reverse proxy + auto-HTTPS +
