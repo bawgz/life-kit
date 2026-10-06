@@ -1,8 +1,8 @@
 name: Deploy to production
 
-# Manual deploys only: repo Actions tab → "Deploy to production" → Run workflow.
-# Pushing to main does NOT trigger a deploy. To make deploys automatic,
-# uncomment the push trigger below.
+# Runs on every push to main, or manually: repo Actions tab → "Deploy to
+# production" → Run workflow. The deploy only runs if typecheck and the test
+# suite pass.
 #
 # How it works: authenticates to GCP via Workload Identity Federation
 # (no long-lived GCP keys), opens an IAP TCP tunnel to the VM, then runs
@@ -27,7 +27,24 @@ on:
     branches: [main]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The other workspaces typecheck against shared's built .d.ts files.
+      - run: npm run build -w packages/shared
+      - run: npm run typecheck
+      - run: npm test
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

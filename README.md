@@ -50,6 +50,7 @@ The SQLite file is created automatically on first run at
 ```
 npm run typecheck   # typecheck every workspace
 npm run build        # build every workspace
+npm test             # backend API + MCP end-to-end tests (temp DBs, no .env needed)
 ```
 
 ## Running on the GCP instance (production)
