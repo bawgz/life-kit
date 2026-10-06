@@ -4,15 +4,23 @@ name: Deploy to production
 # Pushing to main does NOT trigger a deploy. To make deploys automatic,
 # uncomment the push trigger below.
 #
-# Auth is via Workload Identity Federation (no long-lived GCP keys).
-# One-time setup: create the pool/provider/service account (see README or
-# the setup script), then set these repo Variables:
+# How it works: authenticates to GCP via Workload Identity Federation
+# (no long-lived GCP keys), opens an IAP TCP tunnel to the VM, then runs
+# the deploy over plain SSH as the deploy user — so the repo stays in
+# ~/life-kit and no shared directory is needed.
+#
+# One-time setup (on the box):
+#   - Workload identity pool + provider trusting this repo, service account
+#     with roles/iap.tunnelResourceAccessor, repo bound via
+#     roles/iam.workloadIdentityUser (see README or setup notes).
+#   - An SSH keypair: public half appended to the deploy user's
+#     ~/.ssh/authorized_keys on the VM.
+# Repo Variables:
 #   WIF_PROVIDER        e.g. projects/123/locations/global/workloadIdentityPools/gh-actions-pool/providers/gh-provider
 #   GCP_SERVICE_ACCOUNT e.g. github-deploy@life-kit-509418.iam.gserviceaccount.com
-#   DEPLOY_PATH         absolute path of the repo checkout on the VM
-# and one Secret:
-#   GCP_SSH_PRIVATE_KEY the private half of a keypair whose public half is in
-#                       the deploy user's ~/.ssh/authorized_keys on the VM
+#   DEPLOY_USER         the VM username that owns ~/life-kit (run `whoami` on the box)
+# Repo Secret:
+#   GCP_SSH_PRIVATE_KEY the private half of the keypair above
 on:
   workflow_dispatch:
   # push:
@@ -31,17 +39,28 @@ jobs:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
-      - id: deploy
-        uses: google-github-actions/ssh-compute@v2
-        with:
-          instance_name: life-kit
-          zone: us-central1-a
-          project_id: life-kit-509418
-          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          command: |-
-            set -e
-            cd ${{ vars.DEPLOY_PATH }}
-            git fetch origin main
-            git reset --hard origin/main
-            docker compose up -d --build
-            docker compose ps
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy over IAP tunnel
+        env:
+          SSH_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+        run: |-
+          set -e
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s' "$SSH_KEY" > /tmp/deploy_key
+          gcloud compute start-iap-tunnel life-kit 22 \
+            --local-host-port=localhost:2222 \
+            --zone=us-central1-a \
+            --project=life-kit-509418 &
+          TUNNEL_PID=$!
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/localhost/2222) 2>/dev/null && break
+            sleep 2
+          done
+          ssh -i /tmp/deploy_key -p 2222 \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            ${{ vars.DEPLOY_USER }}@localhost \
+            'set -e; cd ~/life-kit && git fetch origin main && git reset --hard origin/main && docker compose up -d --build && docker compose ps'
+          kill $TUNNEL_PID || true
+          shred -u /tmp/deploy_key || rm -f /tmp/deploy_key
